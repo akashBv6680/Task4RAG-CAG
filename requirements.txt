@@ -1,24 +1,31 @@
+# Stable Streamlit
 streamlit==1.32.0
-PyPDF2==4.0.1
+# New, stable PyPDF2 3.x
+PyPDF2==3.0.1 
+# Stable Web Requests
 requests==2.31.0
-# LangChain Core and Integrations
-langchain==0.1.14
-langchain-core==0.1.33
-langchain-community==0.0.26
+
+# Stabilized LangChain Modules (Recommended: Match versions closely)
+langchain==0.2.0
+langchain-core==0.2.0
+langchain-community==0.2.0
 langchain-google-genai==0.0.13
-langchain-text-splitters
+langchain-text-splitters==0.2.0
+
 # Gemini LLM dependency
 google-generativeai==0.3.5
-# Vector Store
-faiss-cpu==1.7.4
-# TTS
+
+# Stable Vector Store (1.8.0 is more robust than 1.7.4)
+faiss-cpu==1.8.0
+
+# TTS & Parsing
 edge-tts==6.1.13
-# Document parsing dependencies (for HTML/XML robustness)
 beautifulsoup4==4.12.2
 lxml==4.9.3
-# Other utilities (included for completeness, though not strictly used in current code)
+aiohttp==3.9.1
+
+# Other utilities
 pandas==2.1.3
 numpy==1.24.3
 nltk==3.8.1
 python-dotenv==1.0.0
-aiohttp==3.9.1
