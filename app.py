@@ -33,12 +33,12 @@ from html.parser import HTMLParser
 # Vector DB & Embeddings
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_community.vectorstores import FAISS
-# 🚨 FIX 1: Corrected path for Text Splitter
+# FIX 1: Corrected path for Text Splitter
 from langchain_text_splitters import RecursiveCharacterTextSplitter 
-# 🚨 FIX 2: Corrected path for Document object
+# FIX 2: Corrected path for Document object
 from langchain_core.documents import Document
-# 🚨 FINAL FIX: Corrected path for RetrievalQA to use the community package 🚨
-from langchain_community.chains import RetrievalQA 
+# 🚨 FINAL FIX 3: Using the deepest, most specific path for RetrievalQA 🚨 
+from langchain_community.chains.retrieval_qa.base import RetrievalQA 
 
 # TTS
 import edge_tts
@@ -376,7 +376,7 @@ def query_rag(query: str, k: int = 5, language: str = "English") -> Dict:
         )
         
         # Create RAG chain
-        # RetrievalQA is accessed via the direct import from langchain_community.chains
+        # RetrievalQA is accessed via the direct import from langchain_community.chains.retrieval_qa.base
         qa_chain = RetrievalQA.from_chain_type(
             llm=llm,
             chain_type="stuff",
