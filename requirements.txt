@@ -4,15 +4,17 @@ PyPDF2
 # Web Requests (for GitHub)
 requests
 # LangChain Core and Integrations
+# Base LangChain package (required for overall structure/legacy access)
 langchain
+# Gemini/Google GenAI LLM & Embeddings
 langchain-google-genai
-# Contains FAISS, RetrievalQA and other community tools
+# 🚨 ESSENTIAL: Contains RetrievalQA, FAISS, and community tools 🚨
 langchain-community
 # Text Splitter Component
 langchain-text-splitters 
 # Document Object
 langchain-core
-# Vector Store
+# Vector Store (FAISS dependency)
 faiss-cpu
 # TTS
 edge-tts
