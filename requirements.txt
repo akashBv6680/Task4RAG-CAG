@@ -1,0 +1,54 @@
+# Core & UI Framework
+streamlit==1.28.1
+streamlit-chat==0.1.1
+
+# LLM & Embeddings
+langchain==0.1.11
+langchain-community==0.0.20
+langchain-google-genai==0.0.11
+google-generativeai==0.3.5
+
+# Vector Database
+faiss-cpu==1.7.4
+# faiss-gpu==1.7.4  # Uncomment if using GPU
+
+# Document Processing
+PyPDF2==3.0.1
+python-pptx==0.6.21
+openpyxl==3.10.10
+pandas==2.0.3
+python-docx==0.8.11
+
+# HTML & XML Processing
+beautifulsoup4==4.12.2
+lxml==4.9.3
+
+# Text Processing & Chunking
+nltk==3.8.1
+
+# Text-to-Speech
+edge-tts==6.1.13
+pydub==0.25.1
+
+# Web Requests (for GitHub raw files)
+requests==2.31.0
+urllib3==2.0.7
+
+# Async Support
+aiohttp==3.9.1
+
+# Utilities
+python-dotenv==1.0.0
+python-multipart==0.0.6
+typing-extensions==4.8.0
+
+# Data Handling
+numpy==1.24.3
+scipy==1.11.3
+
+# Audio Processing
+librosa==0.10.0
+
+# Optional: For better performance
+# torch==2.1.1  # Uncomment if using transformer models
+# transformers==4.35.2  # Uncomment if using HuggingFace models
