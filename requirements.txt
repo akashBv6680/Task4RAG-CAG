@@ -7,8 +7,9 @@ requests
 langchain
 langchain-google-genai
 langchain-community
-# 🚨 ESSENTIAL FIX for RecursiveCharacterTextSplitter 🚨
+# 🚨 ESSENTIAL LangChain Dependencies 🚨
 langchain-text-splitters 
+langchain-core
 # Vector Store
 faiss-cpu
 # TTS
