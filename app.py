@@ -1,28 +1,20 @@
 import streamlit as st
 import os, sys, tempfile, uuid, time, re, io, asyncio, datetime
 from typing import Dict, Any
-from cachetools import LRUCache # For CAG implementation
+from cachetools import LRUCache 
 
 # LlamaIndex Dependencies (Original Project)
-from google.genai.errors import APIError # Used for LLM error handling
+from google.genai.errors import APIError 
 from llama_index.core import VectorStoreIndex, SimpleDirectoryReader, Settings
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.llms.gemini import Gemini
 from llama_index.embeddings.gemini import GeminiEmbedding
 
-# -------------------------
-# TTS dependencies (Using the user's robust implementation)
-# -------------------------
+# TTS dependencies
 try:
     import edge_tts
 except Exception:
     edge_tts = None
-
-# If you use the user's provided TTS methods, you need to bring in their dependencies
-# Since the original project used a simpler LLM setup, we'll strip down the new imports
-# to focus on the TTS fix within the original project's framework.
-
-# We will re-initialize the TTS map and helper functions directly.
 
 # --- 1. Configuration and Caching (Simulating CAG for cost reduction) ---
 MODEL_NAME = "gemini-2.5-flash"
@@ -39,8 +31,7 @@ LANGUAGE_DICT = {
     "Chinese (Simplified)": "zh-Hans", "Portuguese": "pt", "Italian": "it", "Dutch": "nl", "Turkish": "tr"
 }
 
-# ----------------- 🛠️ TTS FIX 4: CORRECTED EDGE-TTS VOICE MAP 🛠️ -----------------
-# Using the user's modern, correct voice map (adjusted to match previous keys)
+# Corrected Edge-TTS Voice Map
 TTS_VOICE_MAP = {
     "en": "en-US-AriaNeural", "es": "es-ES-ElviraNeural", "fr": "fr-FR-HenriNeural", 
     "hi": "hi-IN-SwaraNeural", "ta": "ta-IN-ValluvarNeural", "ja": "ja-JP-NanamiNeural", 
@@ -49,7 +40,6 @@ TTS_VOICE_MAP = {
     "it": "it-IT-ElsaNeural", "nl": "nl-NL-ColetteNeural", "tr": "tr-TR-AhmetNeural", 
     "ru": "ru-RU-DariyaNeural"
 }
-# --------------------------------------------------------------------------------
 
 # Initialize a simple LRU cache for final responses (CAG cost reduction)
 if 'response_cache' not in st.session_state:
@@ -102,7 +92,6 @@ def load_documents(uploaded_files, temp_dir="temp_data"):
     for file in uploaded_files:
         file_path = os.path.join(temp_dir, file.name)
         with open(file_path, "wb") as f:
-            # FIX 2: Corrected file reading
             f.write(file.getvalue()) 
             
     loader = SimpleDirectoryReader(input_dir=temp_dir, recursive=True)
@@ -120,52 +109,51 @@ def get_index(uploaded_files):
         index = VectorStoreIndex.from_documents(documents)
         return index
 
-# ----------------- 🛠️ TTS FIX 3 & 4: INTEGRATING USER'S ROBUST EDGE-TTS CODE 🛠️ -----------------
-
-async def _edge_async(text: str, voice="en-US-AriaNeural", rate=None):
-    """Asynchronous Edge TTS worker, adapted from user's code."""
+# Edge-TTS Functions (Incorporating async helper and correct voice selection)
+async def _edge_async(text: str, voice="en-US-AriaNeural", rate="+0%"):
+    """Asynchronous Edge TTS worker."""
     if not edge_tts:
         return None
     
-    # Normalize rate: accept "0%" and convert to "+0%"
-    kwargs = {"text": text, "voice": voice}
-    if rate:
-        r = rate.strip()
-        if r == "0%" or r == "0":
-            r = "+0%"
-        elif not r.startswith(("+","-")):
-            r = f"+{r}"
-        kwargs["rate"] = r
-        
-    # FIX 3: Correctly using Communicate (capital C)
+    kwargs = {"text": text, "voice": voice, "rate": rate}
     comm = edge_tts.Communicate(**kwargs)
     out = io.BytesIO()
-    # Note: user's stream chunk structure (chunk[2]) is non-standard but copied for fidelity
+    
+    # Read the audio chunks from the stream
     async for chunk in comm.stream():
         if chunk["type"] == "audio":
             out.write(chunk["data"])
+    
+    # If output is empty, it means the TTS service failed to generate audio
+    if out.tell() == 0:
+        # Returning None to indicate failure
+        return None
+        
+    out.seek(0)
     return out.getvalue()
 
 def generate_voice_response(text: str, lang_code: str):
     """
-    Generates audio using Edge-TTS (assuming it's installed and desired).
+    Generates audio using Edge-TTS.
     Returns (audio_bytes, error_message)
     """
     if not edge_tts:
-        return None, "Edge-TTS dependency not found."
+        return None, "Edge-TTS dependency not found. Please install 'edge-tts'."
     
-    # FIX 4: Use the corrected voice map
+    # Select the voice corresponding to the response language
     voice = TTS_VOICE_MAP.get(lang_code, "en-US-AriaNeural")
     
     try:
-        # Use asyncio.run for calling the async function in a sync context (Streamlit)
-        audio_data = asyncio.run(_edge_async(text, voice, rate="+0%"))
+        audio_data = asyncio.run(_edge_async(text, voice))
+        
+        if audio_data is None:
+            # Explicit error for zero audio data received
+            return None, "No audio was received. Please verify that your parameters are correct."
+            
         return audio_data, None
     except Exception as e:
-        # Provide the actual error for better debugging
+        # Catch any other runtime issues (e.g., event loop errors, network issues)
         return None, str(e)
-
-# -------------------------------------------------------------------------------------------
 
 
 # --- 4. Main Application Logic ---
@@ -276,7 +264,6 @@ if st.session_state.get("index_built", False) and index:
                     st.audio(io.BytesIO(audio_buffer), format="audio/mp3", autoplay=True)
                     st.info(f"🔊 Speaking response in {selected_language}...")
                 else:
-                    # Report the specific error from the function
                     st.warning(f"TTS failed: {err}")
 
             # Store final message in history
