@@ -4,8 +4,13 @@ from google import genai
 from google.genai.errors import APIError
 from llama_index.core import VectorStoreIndex, SimpleDirectoryReader, Settings
 from llama_index.core.node_parser import SentenceSplitter
-from llama_index.llms.google_genai import Gemini
-from llama_index.embeddings.google_genai import GeminiEmbedding
+
+# ----------------- 🛠️ CORRECTION APPLIED HERE 🛠️ -----------------
+# Use the corrected import paths for the LLM and Embedding models
+from llama_index.llms.gemini import Gemini
+from llama_index.embeddings.gemini import GeminiEmbedding
+# -----------------------------------------------------------------
+
 from edge_tts import communicate
 import asyncio
 import io
@@ -14,12 +19,12 @@ from cachetools import LRUCache
 
 # --- 1. Configuration and Caching (Simulating CAG for cost reduction) ---
 MODEL_NAME = "gemini-2.5-flash"
-EMBED_MODEL = "models/text-embedding-004"
-CHUNK_SIZE = 1024  # Example chunk size
-CHUNK_OVERLAP = 256 # Overlapping chunking
-VECTOR_STORE_DIR = "./vector_store" # Directory for persistent index
-CACHE_SIZE = 100 # Size for the LRU (Least Recently Used) cache
-CACHE_TTL = 3600 # Cache time-to-live in seconds (1 hour)
+# The default embedding model for GeminiEmbedding is usually excellent
+EMBED_MODEL = "models/text-embedding-004" 
+CHUNK_SIZE = 1024       # Overlapping chunking base size
+CHUNK_OVERLAP = 256     # Overlapping chunking overlap
+CACHE_SIZE = 100        # Size for the LRU (Least Recently Used) cache
+CACHE_TTL = 3600        # Cache time-to-live in seconds (1 hour)
 
 # Multi-language support dictionary
 LANGUAGE_DICT = {
@@ -28,7 +33,7 @@ LANGUAGE_DICT = {
     "Chinese (Simplified)": "zh-Hans", "Portuguese": "pt", "Italian": "it", "Dutch": "nl", "Turkish": "tr"
 }
 
-# Edge-TTS voice mapping (simplified mapping to show TTS capability)
+# Edge-TTS voice mapping (simplified mapping for multiple languages)
 TTS_VOICE_MAP = {
     "en": "en-US-Standard-C",
     "es": "es-ES-ElviraNeural",
@@ -59,13 +64,14 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-st.title("🤖 Multi-Format RAG AI Agent with Gemini 2.5 Flash")
+st.title("📄💬 Multi-Format RAG AI Agent with Gemini 2.5 Flash")
 st.markdown("""
-### 📄 System Status & Features
-- **RAG System:** Supports documents like PDF, TXT, CSV, HTML, XML, GitHub `.raw` files, and others.
-- **Language Support:** Multi-lingual RAG response (17+ languages).
+### ✨ System Status & Features
+- **RAG System:** Supports documents like **PDF, TXT, CSV, HTML, XML, GitHub `.raw` file**, and other formats via `unstructured` and LlamaIndex loaders.
+- **Language Support:** **Multi-lingual** RAG response in 17+ languages.
 - **Response Mode:** Capacity to respond in **Voice Mode (Text-to-Speech)** using Edge-TTS.
-- **Cost Optimization:** Utilizes **Cache-Augmented Generation (CAG)** for common queries to reduce token cost.
+- **Cost Optimization (CAG):** Utilizes **Cache-Augmented Generation** for repeated queries to minimize token cost.
+- **Chunking:** Uses **Overlapping Chunking** (Size: $1024$, Overlap: $256$) for improved context retrieval.
 - **Model:** `gemini-2.5-flash`
 """)
 st.divider()
@@ -82,12 +88,12 @@ def initialize_llm_and_embedding():
             st.error("🚨 Gemini API Key not found in environment variables or Streamlit secrets. Please set it.")
             st.stop()
             
-    # Configure Gemini API client (not strictly needed for LlamaIndex but good practice)
-    # genai.configure(api_key=os.environ["GEMINI_API_KEY"]) 
-
     # LlamaIndex Global Settings
+    # Use the corrected Gemini LLM and Embedding classes
     Settings.llm = Gemini(model=MODEL_NAME, api_key=os.environ["GEMINI_API_KEY"])
     Settings.embed_model = GeminiEmbedding(model_name=EMBED_MODEL, api_key=os.environ["GEMINI_API_KEY"])
+    
+    # Apply chunking settings
     Settings.node_parser = SentenceSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
 
     return Settings.llm, Settings.embed_model
@@ -96,24 +102,30 @@ def load_documents(uploaded_files, temp_dir="temp_data"):
     """Saves uploaded files and loads them into LlamaIndex Document objects."""
     if not os.path.exists(temp_dir):
         os.makedirs(temp_dir)
+    
+    # Clear previous files to avoid mixing contexts from different runs
+    for f in os.listdir(temp_dir):
+        os.remove(os.path.join(temp_dir, f))
         
     for file in uploaded_files:
         file_path = os.path.join(temp_dir, file.name)
         with open(file_path, "wb") as f:
             f.write(file.get_buffer())
             
-    # SimpleDirectoryReader automatically uses various LlamaIndex loaders
-    # to handle PDF, TXT, CSV, HTML, XML, etc.
+    # SimpleDirectoryReader automatically uses various installed LlamaIndex loaders
+    # to handle PDF, TXT, CSV, HTML, XML, etc., using pypdf, unstructured, etc.
     loader = SimpleDirectoryReader(input_dir=temp_dir, recursive=True)
     documents = loader.load_data()
     return documents
 
-@st.cache_resource(hash_funcs={list: lambda _: time.time()}, ttl=CACHE_TTL)
-def get_index(documents):
-    """Creates or updates a VectorStoreIndex from documents."""
-    if not documents:
+@st.cache_resource(hash_funcs={"_uploaded_files_hash": lambda x: tuple(f.size for f in x)}, ttl=CACHE_TTL)
+def get_index(uploaded_files):
+    """Creates or updates a VectorStoreIndex from uploaded documents."""
+    if not uploaded_files:
         return None
+    
     with st.spinner("⏳ Creating/Updating Vector Store Index..."):
+        documents = load_documents(uploaded_files)
         # The index creation uses the global Settings for chunking and embeddings
         index = VectorStoreIndex.from_documents(documents)
         return index
@@ -122,7 +134,7 @@ def generate_voice_response(text, lang_code):
     """Generates audio for a given text using Edge-TTS."""
     voice = TTS_VOICE_MAP.get(lang_code, "en-US-Standard-C") # Fallback to English
     
-    # Edge-TTS requires an async environment, which is simulated here
+    # Define the asynchronous function for Edge-TTS
     async def tts_main():
         comm = communicate(text, voice)
         audio_buffer = io.BytesIO()
@@ -137,7 +149,7 @@ def generate_voice_response(text, lang_code):
         audio_data = asyncio.run(tts_main())
         return audio_data
     except Exception as e:
-        st.error(f"TTS Error: Could not generate voice response. {e}")
+        st.error(f"TTS Error: Could not generate voice response. Check Edge-TTS installation or Streamlit thread compatibility. {e}")
         return None
 
 
@@ -150,8 +162,10 @@ with st.sidebar:
     st.header("⚙️ Settings")
     
     uploaded_files = st.file_uploader(
-        "Upload Documents for RAG (PDF, TXT, CSV, HTML, etc.)",
+        "Upload Documents for RAG (PDF, TXT, CSV, HTML, XML, etc.)",
         accept_multiple_files=True,
+        # Use the list of files to control the cache key
+        key="file_uploader" 
     )
     
     # Response Mode
@@ -159,36 +173,41 @@ with st.sidebar:
         "Select Response Mode:",
         ("Text Only", "Text and Voice"),
         index=0,
+        key="response_mode_radio"
     )
 
     # Multi-language selector
     selected_language = st.selectbox(
         "Select Response Language:",
         options=list(LANGUAGE_DICT.keys()),
-        index=0 # English default
+        index=0, # English default
+        key="language_select"
     )
     lang_code = LANGUAGE_DICT[selected_language]
     
     st.subheader("RAG Index Status")
+    
+    # Check if files are uploaded and process them
     if uploaded_files:
         st.success(f"Files uploaded: {len(uploaded_files)}")
-        if st.button("🔄 **Process Documents & Build RAG Index**"):
-            documents = load_documents(uploaded_files)
-            index = get_index(documents)
-            st.session_state.index_built = True
-            st.success("✅ RAG Index Built Successfully!")
+        # The index is now created automatically/cached by the st.cache_resource function
+        index = get_index(uploaded_files)
+        st.session_state.index_built = True
+        st.success("✅ RAG Index is Ready/Cached!")
     else:
         st.warning("Please upload documents to build the RAG Index.")
         st.session_state.index_built = False
         index = None
 
 # Main Chat Interface
-if st.session_state.get("index_built", False):
-    index = get_index(load_documents(uploaded_files))
+if st.session_state.get("index_built", False) and index:
+    # Get the query engine from the index
     query_engine = index.as_query_engine(
         response_mode="compact", # Optimize for smaller token usage
         llm=llm,
         streaming=True, # Enable streaming for fast initial response
+        # Optional: Set a system prompt for language handling
+        system_prompt=f"You are a helpful RAG AI assistant. Answer the user's question based ONLY on the context provided. The final response MUST be in the selected language: {selected_language}."
     )
 
     if "messages" not in st.session_state:
@@ -209,25 +228,23 @@ if st.session_state.get("index_built", False):
 
         # Generate agent response
         with st.chat_message("assistant"):
-            with st.spinner(f"Thinking in {selected_language}..."):
-                
-                # CAG: Check cache first
-                cache_key = (prompt, lang_code)
-                cached_response = st.session_state.response_cache.get(cache_key)
+            
+            # CAG: Check cache first based on query and language
+            cache_key = (prompt, lang_code)
+            cached_response = st.session_state.response_cache.get(cache_key)
+            final_response_text = ""
 
-                if cached_response:
-                    st.info("💡 **Cache Hit (CAG)**: Returning cached answer to save tokens.")
-                    final_response_text = cached_response
-                else:
-                    # RAG Query with Multi-language Prompt
-                    language_prompt = f"Translate and answer the following question in **{selected_language}** based ONLY on the provided context: {prompt}"
-                    
+            if cached_response:
+                st.info("💡 **Cache Hit (CAG)**: Returning cached answer to save tokens.")
+                final_response_text = cached_response
+                st.markdown(final_response_text) # Display cached response directly
+            else:
+                with st.spinner(f"Thinking in {selected_language} (RAG Query)..."):
                     try:
                         # Stream the RAG response
-                        response_stream = query_engine.query(language_prompt)
+                        response_stream = query_engine.query(prompt)
                         
                         # Build the full response text from the stream
-                        final_response_text = ""
                         response_placeholder = st.empty()
                         for token in response_stream.response_gen:
                             final_response_text += token
@@ -238,7 +255,7 @@ if st.session_state.get("index_built", False):
                         st.session_state.response_cache[cache_key] = final_response_text
 
                     except APIError as e:
-                        final_response_text = f"An API Error occurred: {e}"
+                        final_response_text = f"An API Error occurred. Please check your Gemini API key and permissions. Details: {e}"
                         st.error(final_response_text)
                     except Exception as e:
                         final_response_text = f"An unexpected error occurred: {e}"
@@ -255,3 +272,8 @@ if st.session_state.get("index_built", False):
             st.session_state.messages.append({"role": "assistant", "content": final_response_text})
 else:
     st.info("Please upload and process your documents in the sidebar to begin chatting.")
+
+# Next Step Suggestion
+st.sidebar.markdown("---")
+st.sidebar.markdown("### Next Step")
+st.sidebar.info("Upload new documents or select a language and ask your first question!")
