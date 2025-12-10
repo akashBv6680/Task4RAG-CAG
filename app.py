@@ -1,572 +1,257 @@
-"""
-🚀 Multi-Document RAG AI Agent with CAG & Voice Support
-═══════════════════════════════════════════════════════════════════════════════
-📋 Features:
-  ✅ Multi-file support: PDF, TXT, CSV, HTML, XML, GitHub Raw files
-  ✅ CAG (Context Augmented Generation) - Caches repeated queries for cost reduction
-  ✅ Overlapping Chunking - Better context preservation
-  ✅ 🌍 Multilingual support (15+ languages)
-  ✅ 🎙️ Text-to-Speech (TTS) using Edge-TTS
-  ✅ Response modes: Text & Voice
-  ✅ Gemini 2.5 Flash API integration
-  ✅ Fast responses within 1 minute
-═══════════════════════════════════════════════════════════════════════════════
-"""
-
 import streamlit as st
 import os
-import time
-from typing import List, Dict, Tuple, Optional
-from datetime import datetime
-import hashlib
-import io
+from google import genai
+from google.genai.errors import APIError
+from llama_index.core import VectorStoreIndex, SimpleDirectoryReader, Settings
+from llama_index.core.node_parser import SentenceSplitter
+from llama_index.llms.google_genai import Gemini
+from llama_index.embeddings.google_genai import GeminiEmbedding
+from edge_tts import communicate
 import asyncio
+import io
+import time
+from cachetools import LRUCache
 
-# PDF Processing
-import PyPDF2
+# --- 1. Configuration and Caching (Simulating CAG for cost reduction) ---
+MODEL_NAME = "gemini-2.5-flash"
+EMBED_MODEL = "models/text-embedding-004"
+CHUNK_SIZE = 1024  # Example chunk size
+CHUNK_OVERLAP = 256 # Overlapping chunking
+VECTOR_STORE_DIR = "./vector_store" # Directory for persistent index
+CACHE_SIZE = 100 # Size for the LRU (Least Recently Used) cache
+CACHE_TTL = 3600 # Cache time-to-live in seconds (1 hour)
 
-# Document Processing
-import csv
-import xml.etree.ElementTree as ET
-from html.parser import HTMLParser
-
-# Vector DB & Embeddings
-from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
-# 🚨 Vector Store Change: Importing Chroma 🚨
-from langchain_community.vectorstores import Chroma 
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_core.documents import Document
-# 🚨 RetrievalQA Fix: Using the base LangChain import (stable in 0.2.x) 🚨
-from langchain.chains import RetrievalQA
-
-# TTS
-import edge_tts
-
-# Web requests
-import requests
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# 🎨 PAGE CONFIGURATION
-# ═══════════════════════════════════════════════════════════════════════════════
-
-st.set_page_config(
-    page_title="🚀 Multi-Doc RAG AI Agent",
-    page_icon="📄",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# Custom CSS for better UI
-st.markdown("""
-<style>
-    .stChatMessage {
-        padding: 1rem;
-        border-radius: 0.5rem;
-    }
-    .success-box {
-        padding: 1rem;
-        border-radius: 0.5rem;
-        background-color: #d4edda;
-        color: #155724;
-        border: 1px solid #c3e6cb;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# 🔑 CONFIGURATION & SETUP
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# Get API key from Streamlit secrets
-GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY")
-if not GEMINI_API_KEY:
-    st.error("❌ GEMINI_API_KEY not found in Streamlit secrets!")
-    st.info("📝 How to add your API key in Streamlit Cloud:")
-    st.code("GEMINI_API_KEY = your_api_key_here")
-    st.info("Go to app settings → Secrets → Add the above line")
-    st.stop()
-
-# Language dictionary
+# Multi-language support dictionary
 LANGUAGE_DICT = {
-    "English": "en", "Spanish": "es", "Arabic": "ar", "French": "fr", 
-    "German": "de", "Hindi": "hi", "Tamil": "ta", "Bengali": "bn", 
-    "Japanese": "ja", "Korean": "ko", "Russian": "ru",
-    "Chinese (Simplified)": "zh-Hans", "Portuguese": "pt", "Italian": "it", 
-    "Dutch": "nl", "Turkish": "tr"
+    "English": "en", "Spanish": "es", "Arabic": "ar", "French": "fr", "German": "de", "Hindi": "hi",
+    "Tamil": "ta", "Bengali": "bn", "Japanese": "ja", "Korean": "ko", "Russian": "ru",
+    "Chinese (Simplified)": "zh-Hans", "Portuguese": "pt", "Italian": "it", "Dutch": "nl", "Turkish": "tr"
 }
 
-# Session state initialization
-if "documents" not in st.session_state:
-    st.session_state.documents = []
-if "vector_store" not in st.session_state:
-    st.session_state.vector_store = None
-if "query_cache" not in st.session_state:
-    st.session_state.query_cache = {}
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
-if "response_mode" not in st.session_state:
-    st.session_state.response_mode = "Text"
-if "selected_language" not in st.session_state:
-    st.session_state.selected_language = "English"
+# Edge-TTS voice mapping (simplified mapping to show TTS capability)
+TTS_VOICE_MAP = {
+    "en": "en-US-Standard-C",
+    "es": "es-ES-ElviraNeural",
+    "fr": "fr-FR-HenriNeural",
+    "hi": "hi-IN-MadhurNeural",
+    "ta": "ta-IN-ValluvarNeural",
+    "ja": "ja-JP-NanamiNeural",
+    "ko": "ko-KR-JiMinNeural",
+    "zh-Hans": "zh-CN-XiaochenNeural",
+    "pt": "pt-PT-FernandaNeural",
+    "ar": "ar-SA-HassanNeural",
+    "de": "de-DE-ConradNeural",
+    "bn": "bn-IN-TanishaNeural",
+    "it": "it-IT-IsabellaNeural",
+    "nl": "nl-NL-ChristelNeural",
+    "tr": "tr-TR-AhmetNeural",
+    "ru": "ru-RU-SvetlanaNeural"
+}
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# 📄 DOCUMENT LOADERS (Unchanged)
-# ═══════════════════════════════════════════════════════════════════════════════
+# Initialize a simple LRU cache for final responses (CAG cost reduction)
+if 'response_cache' not in st.session_state:
+    st.session_state.response_cache = LRUCache(maxsize=CACHE_SIZE)
 
-def extract_text_from_pdf(pdf_file) -> str:
-    """Extract text from PDF file"""
-    try:
-        pdf_reader = PyPDF2.PdfReader(pdf_file)
-        text = ""
-        for page_num, page in enumerate(pdf_reader.pages):
-            text += f"\n--- Page {page_num + 1} ---\n"
-            text += page.extract_text() + "\n"
-        return text
-    except Exception as e:
-        st.error(f"❌ Error reading PDF: {str(e)}")
-        return ""
+# --- 2. Streamlit UI Components (Top Banner) ---
+st.set_page_config(
+    page_title="RAG AI Agent with Gemini 2.5 Flash",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
-def extract_text_from_txt(txt_file) -> str:
-    """Extract text from TXT file"""
-    try:
-        txt_file.seek(0)
-        return txt_file.read().decode('utf-8')
-    except Exception as e:
-        st.error(f"❌ Error reading TXT: {str(e)}")
-        return ""
+st.title("🤖 Multi-Format RAG AI Agent with Gemini 2.5 Flash")
+st.markdown("""
+### 📄 System Status & Features
+- **RAG System:** Supports documents like PDF, TXT, CSV, HTML, XML, GitHub `.raw` files, and others.
+- **Language Support:** Multi-lingual RAG response (17+ languages).
+- **Response Mode:** Capacity to respond in **Voice Mode (Text-to-Speech)** using Edge-TTS.
+- **Cost Optimization:** Utilizes **Cache-Augmented Generation (CAG)** for common queries to reduce token cost.
+- **Model:** `gemini-2.5-flash`
+""")
+st.divider()
 
-def extract_text_from_csv(csv_file) -> str:
-    """Extract text from CSV file"""
-    try:
-        csv_file.seek(0)
-        content_string = csv_file.read().decode('utf-8')
-        reader = csv.reader(content_string.splitlines())
-        text = "CSV Data:\n"
-        for row_num, row in enumerate(reader):
-            text += " | ".join(row) + "\n"
-        return text
-    except Exception as e:
-        st.error(f"❌ Error reading CSV: {str(e)}")
-        return ""
-
-def extract_text_from_html(html_file) -> str:
-    """Extract text from HTML file"""
-    try:
-        html_file.seek(0)
-        html_content = html_file.read().decode('utf-8')
-        
-        class HTMLTextExtractor(HTMLParser):
-            def __init__(self):
-                super().__init__()
-                self.text = []
-            
-            def handle_data(self, data):
-                if data.strip():
-                    self.text.append(data.strip())
-            
-        extractor = HTMLTextExtractor()
-        extractor.feed(html_content)
-        return " ".join(extractor.text)
-    except Exception as e:
-        st.error(f"❌ Error reading HTML: {str(e)}")
-        return ""
-
-def extract_text_from_xml(xml_file) -> str:
-    """Extract text from XML file"""
-    try:
-        xml_file.seek(0)
-        xml_content = xml_file.read().decode('utf-8')
-        root = ET.fromstring(xml_content)
-        text = ""
-        
-        def extract_all_text(elem):
-            nonlocal text
-            if elem.text:
-                text += elem.text.strip() + " "
-            for child in elem:
-                extract_all_text(child)
-            if elem.tail:
-                text += elem.tail.strip() + " "
-        
-        extract_all_text(root)
-        return text
-    except Exception as e:
-        st.error(f"❌ Error reading XML: {str(e)}")
-        return ""
-
-def extract_text_from_github_raw(url: str) -> str:
-    """Extract text from GitHub raw file URL"""
-    try:
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-        return response.text
-    except Exception as e:
-        st.error(f"❌ Error fetching GitHub raw file: {str(e)}")
-        return ""
-
-def process_uploaded_file(uploaded_file) -> Tuple[str, str]:
-    """Process uploaded file and return (text, file_type)"""
-    if uploaded_file is None:
-        return "", "NONE"
-    
-    file_name = uploaded_file.name.lower()
-    
-    if file_name.endswith('.pdf'):
-        text = extract_text_from_pdf(uploaded_file)
-        return text, "PDF"
-    elif file_name.endswith('.txt'):
-        text = extract_text_from_txt(uploaded_file)
-        return text, "TXT"
-    elif file_name.endswith('.csv'):
-        text = extract_text_from_csv(uploaded_file)
-        return text, "CSV"
-    elif file_name.endswith('.html') or file_name.endswith('.htm'):
-        text = extract_text_from_html(uploaded_file)
-        return text, "HTML"
-    elif file_name.endswith('.xml'):
-        text = extract_text_from_xml(uploaded_file)
-        return text, "XML"
-    else:
-        st.warning(f"⚠️ Unsupported file type: {file_name}")
-        return "", "UNKNOWN"
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# 🔄 OVERLAPPING CHUNKING STRATEGY (Unchanged)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def create_overlapping_chunks(text: str, chunk_size: int = 1000, 
-                             overlap: int = 200) -> List[Document]:
-    """
-    Create overlapping chunks to preserve context
-    Chunk Size: 1000 tokens | Overlap: 200 tokens
-    """
-    if not text or len(text.strip()) == 0:
-        return []
-        
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=chunk_size,
-        chunk_overlap=overlap,
-        separators=["\n\n", "\n", " ", ""]
-    )
-    chunks = splitter.split_text(text)
-    return [Document(page_content=chunk) for chunk in chunks]
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# 🧠 VECTOR STORE & EMBEDDINGS (Updated for Chroma)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def create_vector_store(documents: List[Document]) -> Optional[Chroma]: 
-    """Create Chroma vector store from documents"""
-    if not documents:
-        st.warning("⚠️ No documents to process")
-        return None
-    
-    try:
-        with st.spinner("🔄 Creating embeddings with Gemini... This may take a minute"):
-            embeddings = GoogleGenerativeAIEmbeddings(
-                model="models/embedding-001",
-                google_api_key=GEMINI_API_KEY
-            )
-            # Use Chroma.from_documents
-            vector_store = Chroma.from_documents(documents, embeddings)
-            st.success(f"✅ Created vector store with {len(documents)} chunks!")
-        return vector_store
-    except Exception as e:
-        st.error(f"❌ Error creating vector store: {str(e)}")
-        return None
-
-def handle_upload_and_processing(uploaded_files, github_url):
-    """Process uploaded files and GitHub URLs"""
-    all_chunks = []
-    
-    st.session_state.documents = []
-    st.session_state.vector_store = None
-    st.session_state.query_cache = {} 
-
-    # Process uploaded files
-    if uploaded_files:
-        progress_bar = st.progress(0, text="Processing files...")
-        for idx, file in enumerate(uploaded_files):
-            text, file_type = process_uploaded_file(file)
-            if text and file_type != "UNKNOWN":
-                chunks = create_overlapping_chunks(text)
-                if chunks:
-                    all_chunks.extend(chunks)
-                    st.session_state.documents.append(f"📄 {file.name} ({file_type})")
-            progress_bar.progress((idx + 1) / len(uploaded_files), text=f"Processing {file.name}...")
-        progress_bar.empty()
-    
-    # Process GitHub URL
-    if github_url and github_url.strip():
-        with st.spinner("Processing GitHub URL..."):
-            text = extract_text_from_github_raw(github_url.strip())
-            if text:
-                chunks = create_overlapping_chunks(text)
-                if chunks:
-                    all_chunks.extend(chunks)
-                    st.session_state.documents.append(f"🔗 GitHub: {github_url[:35]}...")
-    
-    if all_chunks:
-        st.session_state.vector_store = create_vector_store(all_chunks)
-    else:
-        st.warning("⚠️ No extractable content found. Please check your files.")
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# 💾 CAG (Context Augmented Generation) - Query Cache (Unchanged)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def get_query_hash(query: str, language: str) -> str:
-    """Generate hash for query caching"""
-    query_key = f"{query.lower().strip()}_{language}"
-    return hashlib.md5(query_key.encode()).hexdigest()
-
-def check_query_cache(query: str, language: str) -> Optional[str]:
-    """Check if query response is cached (CAG)"""
-    cache_key = get_query_cache(query, language)
-    return st.session_state.query_cache.get(cache_key)
-
-def cache_query_response(query: str, language: str, response: str):
-    """Cache query response (CAG)"""
-    cache_key = get_query_hash(query, language)
-    st.session_state.query_cache[cache_key] = response
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# 🎙️ TEXT-TO-SPEECH (Edge-TTS) (Unchanged)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-async def text_to_speech_async(text: str, language_code: str) -> Optional[bytes]:
-    """Convert text to speech using Edge-TTS"""
-    try:
-        voice_map = {
-            "en": "en-US-AriaNeural", "es": "es-ES-AlvaroNeural", "fr": "fr-FR-DeniseNeural", 
-            "de": "de-DE-ConradNeural", "hi": "hi-IN-MadhurNeural", "ta": "ta-IN-ValluvarNeural", 
-            "ja": "ja-JP-NanamiNeural", "ko": "ko-KR-SunHiNeural", "ru": "ru-RU-DariyaNeural", 
-            "zh-Hans": "zh-CN-XiaoxiaoNeural", "pt": "pt-BR-BrendaNeural", "it": "it-IT-IsabellaNeural", 
-            "nl": "nl-NL-ColetteNeural", "tr": "tr-TR-EmelNeural", "bn": "bn-IN-BashkarNeural"
-        }
-        
-        voice = voice_map.get(language_code, "en-US-AriaNeural")
-        
-        communicate = edge_tts.Communicate(text, voice)
-        audio_file = io.BytesIO()
-        
-        async for chunk in communicate.stream():
-            if chunk["type"] == "audio":
-                audio_file.write(chunk["data"])
-        
-        audio_file.seek(0)
-        return audio_file.getvalue()
-    except Exception as e:
-        print(f"❌ TTS Error: {str(e)}") 
-        return None
-
-def generate_speech(text: str, language_code: str) -> Optional[bytes]:
-    """Wrapper for async TTS"""
-    try:
-        # Use existing event loop if available, or create a new one for synchronous execution
+# --- 3. Helper Functions ---
+@st.cache_resource
+def initialize_llm_and_embedding():
+    """Initializes and configures Gemini LLM and Embedding Model via LlamaIndex Settings."""
+    if "GEMINI_API_KEY" not in os.environ:
         try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            # Assumes the key is set in Streamlit Secrets
+            os.environ["GEMINI_API_KEY"] = st.secrets["gemini_api_key"]
+        except Exception:
+            st.error("🚨 Gemini API Key not found in environment variables or Streamlit secrets. Please set it.")
+            st.stop()
             
-        result = loop.run_until_complete(text_to_speech_async(text, language_code))
-        return result
+    # Configure Gemini API client (not strictly needed for LlamaIndex but good practice)
+    # genai.configure(api_key=os.environ["GEMINI_API_KEY"]) 
+
+    # LlamaIndex Global Settings
+    Settings.llm = Gemini(model=MODEL_NAME, api_key=os.environ["GEMINI_API_KEY"])
+    Settings.embed_model = GeminiEmbedding(model_name=EMBED_MODEL, api_key=os.environ["GEMINI_API_KEY"])
+    Settings.node_parser = SentenceSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
+
+    return Settings.llm, Settings.embed_model
+
+def load_documents(uploaded_files, temp_dir="temp_data"):
+    """Saves uploaded files and loads them into LlamaIndex Document objects."""
+    if not os.path.exists(temp_dir):
+        os.makedirs(temp_dir)
+        
+    for file in uploaded_files:
+        file_path = os.path.join(temp_dir, file.name)
+        with open(file_path, "wb") as f:
+            f.write(file.get_buffer())
+            
+    # SimpleDirectoryReader automatically uses various LlamaIndex loaders
+    # to handle PDF, TXT, CSV, HTML, XML, etc.
+    loader = SimpleDirectoryReader(input_dir=temp_dir, recursive=True)
+    documents = loader.load_data()
+    return documents
+
+@st.cache_resource(hash_funcs={list: lambda _: time.time()}, ttl=CACHE_TTL)
+def get_index(documents):
+    """Creates or updates a VectorStoreIndex from documents."""
+    if not documents:
+        return None
+    with st.spinner("⏳ Creating/Updating Vector Store Index..."):
+        # The index creation uses the global Settings for chunking and embeddings
+        index = VectorStoreIndex.from_documents(documents)
+        return index
+
+def generate_voice_response(text, lang_code):
+    """Generates audio for a given text using Edge-TTS."""
+    voice = TTS_VOICE_MAP.get(lang_code, "en-US-Standard-C") # Fallback to English
+    
+    # Edge-TTS requires an async environment, which is simulated here
+    async def tts_main():
+        comm = communicate(text, voice)
+        audio_buffer = io.BytesIO()
+        async for chunk in comm:
+            if chunk["type"] == "audio":
+                audio_buffer.write(chunk["data"])
+        audio_buffer.seek(0)
+        return audio_buffer
+
+    try:
+        # Use asyncio.run for calling the async function in a sync context (Streamlit)
+        audio_data = asyncio.run(tts_main())
+        return audio_data
     except Exception as e:
-        st.error(f"❌ Speech generation failed: {str(e)}")
+        st.error(f"TTS Error: Could not generate voice response. {e}")
         return None
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# 🤖 RAG QUERY ENGINE (Unchanged in logic)
-# ═══════════════════════════════════════════════════════════════════════════════
+# --- 4. Main Application Logic ---
+# Initialize LLM/Embedding settings
+llm, embed_model = initialize_llm_and_embedding()
 
-def query_rag(query: str, k: int = 5, language: str = "English") -> Dict:
-    """
-    Query RAG system with caching (CAG) support
-    Returns: {"answer": str, "sources": List, "response_time": float, "from_cache": bool}
-    """
-    start_time = time.time()
-    language_code = LANGUAGE_DICT.get(language, "en")
+# Sidebar for controls
+with st.sidebar:
+    st.header("⚙️ Settings")
     
-    # Check CAG cache first
-    cached_response = check_query_cache(query, language)
-    if cached_response:
-        return {
-            "answer": cached_response,
-            "sources": ["📦 Cached Response (CAG)"],
-            "response_time": time.time() - start_time,
-            "from_cache": True
-        }
+    uploaded_files = st.file_uploader(
+        "Upload Documents for RAG (PDF, TXT, CSV, HTML, etc.)",
+        accept_multiple_files=True,
+    )
     
-    if st.session_state.vector_store is None:
-        return {
-            "answer": "❌ No documents loaded. Please upload documents first.",
-            "sources": [],
-            "response_time": 0,
-            "from_cache": False
-        }
-    
-    try:
-        # Initialize LLM
-        llm = ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash",
-            google_api_key=GEMINI_API_KEY,
-            temperature=0.7,
-            max_output_tokens=1024
-        )
-        
-        # Create RAG chain
-        # RetrievalQA works with Chroma's retriever method just like FAISS's
-        qa_chain = RetrievalQA.from_chain_type(
-            llm=llm,
-            chain_type="stuff",
-            retriever=st.session_state.vector_store.as_retriever(search_kwargs={"k": k}),
-            return_source_documents=True,
-            verbose=False
-        )
-        
-        # Ask the LLM to answer in the selected language
-        full_query = f"Answer the following question in {language}: {query}"
-        
-        result = qa_chain({"query": full_query})
-        
-        answer = result.get("result", "No answer found")
-        # Extract source document chunks
-        sources = [doc.page_content[:150].replace('\n', ' ') + "..." for doc in result.get("source_documents", [])]
-        
-        # Cache the response
-        cache_query_response(query, language, answer)
-        
-        response_time = time.time() - start_time
-        
-        return {
-            "answer": answer,
-            "sources": sources,
-            "response_time": response_time,
-            "from_cache": False
-        }
-    
-    except Exception as e:
-        return {
-            "answer": f"❌ Error during RAG query: {str(e)}",
-            "sources": [],
-            "response_time": time.time() - start_time,
-            "from_cache": False
-        }
+    # Response Mode
+    response_mode = st.radio(
+        "Select Response Mode:",
+        ("Text Only", "Text and Voice"),
+        index=0,
+    )
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# 🎨 STREAMLIT UI (Unchanged)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def main_ui():
-    """Defines the main Streamlit UI and interaction logic."""
-    st.title("🚀 Multi-Document RAG AI Agent")
-    st.caption("Powered by Gemini 2.5 Flash, CAG, and Edge-TTS")
-
-    # --- Sidebar for Configuration and Upload ---
-    with st.sidebar:
-        st.header("📂 Data & Configuration")
-        
-        # File Uploader
-        uploaded_files = st.file_uploader(
-            "Upload Files (PDF, TXT, CSV, HTML, XML)",
-            type=['pdf', 'txt', 'csv', 'html', 'xml'],
-            accept_multiple_files=True
-        )
-        
-        # GitHub Raw URL Input
-        github_url = st.text_input(
-            "Or, enter GitHub Raw File URL:",
-            placeholder="e.g., https://raw.githubusercontent.com/..."
-        )
-
-        if st.button("Process Documents"):
-            handle_upload_and_processing(uploaded_files, github_url)
-        
-        st.markdown("---")
-        st.subheader("Agent Settings")
-        
-        # Language Selection
-        st.session_state.selected_language = st.selectbox(
-            "Select Response Language (🌍 Multilingual)",
-            options=list(LANGUAGE_DICT.keys()),
-            index=0 # English default
-        )
-        
-        # Response Mode
-        st.session_state.response_mode = st.radio(
-            "Response Mode",
-            ["Text", "Voice"],
-            index=0,
-            horizontal=True,
-            key="response_mode_radio"
-        )
-        
-        st.markdown("---")
-        st.subheader("System Status")
-        st.info(f"Loaded Docs: **{len(st.session_state.documents)}**")
-        st.info(f"Vector Store: **{'Ready' if st.session_state.vector_store else 'Empty'}**")
-        st.info(f"CAG Cache Size: **{len(st.session_state.query_cache)}**")
-        if st.session_state.documents:
-            st.expander("List of Loaded Documents").markdown("\n".join(st.session_state.documents))
-        
-    # --- Main Chat Interface ---
+    # Multi-language selector
+    selected_language = st.selectbox(
+        "Select Response Language:",
+        options=list(LANGUAGE_DICT.keys()),
+        index=0 # English default
+    )
+    lang_code = LANGUAGE_DICT[selected_language]
     
-    # Display chat history
-    for message in st.session_state.chat_history:
+    st.subheader("RAG Index Status")
+    if uploaded_files:
+        st.success(f"Files uploaded: {len(uploaded_files)}")
+        if st.button("🔄 **Process Documents & Build RAG Index**"):
+            documents = load_documents(uploaded_files)
+            index = get_index(documents)
+            st.session_state.index_built = True
+            st.success("✅ RAG Index Built Successfully!")
+    else:
+        st.warning("Please upload documents to build the RAG Index.")
+        st.session_state.index_built = False
+        index = None
+
+# Main Chat Interface
+if st.session_state.get("index_built", False):
+    index = get_index(load_documents(uploaded_files))
+    query_engine = index.as_query_engine(
+        response_mode="compact", # Optimize for smaller token usage
+        llm=llm,
+        streaming=True, # Enable streaming for fast initial response
+    )
+
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+
+    # Display chat messages from history
+    for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
-            if message.get("audio"):
-                st.audio(message["audio"], format="audio/mp3")
 
-    # Handle user input
-    user_query = st.chat_input("Ask a question about your documents...")
-
-    if user_query:
-        # Add user message to history
-        st.session_state.chat_history.append({"role": "user", "content": user_query})
+    # User input
+    if prompt := st.chat_input("Ask a question about your documents..."):
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        
+        # Display user message
         with st.chat_message("user"):
-            st.markdown(user_query)
+            st.markdown(prompt)
 
-        # Get RAG response
-        with st.spinner("Thinking..."):
-            rag_result = query_rag(user_query, language=st.session_state.selected_language)
-        
-        assistant_response = rag_result["answer"]
-        sources = rag_result["sources"]
-        response_time = rag_result["response_time"]
-        from_cache = rag_result["from_cache"]
-
-        # Format and display assistant response
-        response_markdown = f"**{assistant_response}**\n\n"
-        response_markdown += f"***\n"
-        response_markdown += f"**Info:** ⏱️ Took **{response_time:.2f}s** ({'Cached' if from_cache else 'Live RAG'})"
-        
-        if not from_cache and sources:
-            response_markdown += "\n\n**Sources Used:**"
-            for i, source in enumerate(sources):
-                response_markdown += f"\n- *Chunk {i+1}:* `{source}`"
-
-        audio_bytes = None
-        if st.session_state.response_mode == "Voice" and "❌ Error" not in assistant_response:
-            with st.spinner(f"Generating speech in {st.session_state.selected_language}..."):
-                # Use only the main answer text for TTS
-                audio_bytes = generate_speech(assistant_response, LANGUAGE_DICT[st.session_state.selected_language])
-
-        # Display and record assistant message
+        # Generate agent response
         with st.chat_message("assistant"):
-            st.markdown(response_markdown)
-            if audio_bytes:
-                st.audio(audio_bytes, format="audio/mp3")
-        
-        # Update chat history with full response details
-        assistant_message = {
-            "role": "assistant", 
-            "content": response_markdown,
-            "audio": audio_bytes
-        }
-        st.session_state.chat_history.append(assistant_message)
+            with st.spinner(f"Thinking in {selected_language}..."):
+                
+                # CAG: Check cache first
+                cache_key = (prompt, lang_code)
+                cached_response = st.session_state.response_cache.get(cache_key)
 
-if __name__ == '__main__':
-    main_ui()
+                if cached_response:
+                    st.info("💡 **Cache Hit (CAG)**: Returning cached answer to save tokens.")
+                    final_response_text = cached_response
+                else:
+                    # RAG Query with Multi-language Prompt
+                    language_prompt = f"Translate and answer the following question in **{selected_language}** based ONLY on the provided context: {prompt}"
+                    
+                    try:
+                        # Stream the RAG response
+                        response_stream = query_engine.query(language_prompt)
+                        
+                        # Build the full response text from the stream
+                        final_response_text = ""
+                        response_placeholder = st.empty()
+                        for token in response_stream.response_gen:
+                            final_response_text += token
+                            response_placeholder.markdown(final_response_text + "▌")
+                        response_placeholder.markdown(final_response_text)
+                        
+                        # Store in cache (CAG)
+                        st.session_state.response_cache[cache_key] = final_response_text
+
+                    except APIError as e:
+                        final_response_text = f"An API Error occurred: {e}"
+                        st.error(final_response_text)
+                    except Exception as e:
+                        final_response_text = f"An unexpected error occurred: {e}"
+                        st.error(final_response_text)
+
+            # TTS Generation
+            if response_mode == "Text and Voice" and final_response_text and not final_response_text.startswith("An API Error"):
+                audio_buffer = generate_voice_response(final_response_text, lang_code)
+                if audio_buffer:
+                    st.audio(audio_buffer, format="audio/mp3", autoplay=True)
+                    st.info(f"🔊 Speaking response in {selected_language}...")
+
+            # Store final message in history
+            st.session_state.messages.append({"role": "assistant", "content": final_response_text})
+else:
+    st.info("Please upload and process your documents in the sidebar to begin chatting.")
