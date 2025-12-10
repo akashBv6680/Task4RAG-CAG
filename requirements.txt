@@ -6,9 +6,11 @@ requests
 # LangChain Core and Integrations
 langchain
 langchain-google-genai
+# Contains FAISS, RetrievalQA and other community tools
 langchain-community
-# 🚨 ESSENTIAL LangChain Dependencies 🚨
+# Text Splitter Component
 langchain-text-splitters 
+# Document Object
 langchain-core
 # Vector Store
 faiss-cpu
