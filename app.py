@@ -20,7 +20,7 @@ from typing import List, Dict, Tuple, Optional
 from datetime import datetime
 import hashlib
 import json
-import io # <--- ESSENTIAL: Added for BytesIO in TTS function
+import io # ESSENTIAL: Added for BytesIO in TTS function
 
 # PDF Processing
 import PyPDF2
@@ -33,12 +33,11 @@ from html.parser import HTMLParser
 # Vector DB & Embeddings
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_community.vectorstores import FAISS
-# 🚨 CORRECTED IMPORT PATH 🚨
+# 🚨 FIX 1: Corrected path for Text Splitter
 from langchain_text_splitters import RecursiveCharacterTextSplitter 
-from langchain.schema import Document
-# RetrievalQA is often still available here, but its location is sometimes unstable. 
-# We'll keep it as-is for now, but be ready to change to 'from langchain.chains import RetrievalQA' 
-# or use the new chain creation methods if this fails.
+# 🚨 FIX 2: Corrected path for Document object
+from langchain_core.documents import Document
+# RetrievalQA chain
 from langchain.chains.retrieval_qa.base import RetrievalQA 
 
 # TTS
@@ -98,7 +97,6 @@ def extract_text_from_pdf(pdf_file) -> str:
 def extract_text_from_txt(txt_file) -> str:
     """Extract text from TXT file"""
     try:
-        # Reset file pointer and decode
         txt_file.seek(0)
         return txt_file.read().decode('utf-8')
     except Exception as e:
@@ -109,7 +107,6 @@ def extract_text_from_csv(csv_file) -> str:
     """Extract text from CSV file"""
     try:
         csv_file.seek(0)
-        # Use io.StringIO to treat the string as a file for the CSV reader
         content_string = csv_file.read().decode('utf-8')
         reader = csv.reader(io.StringIO(content_string).readlines())
         text = ""
@@ -220,7 +217,6 @@ def create_overlapping_chunks(text: str, chunk_size: int = 1000,
         separators=["\n\n", "\n", " ", ""]
     )
     chunks = splitter.split_text(text)
-    # 
     return [Document(page_content=chunk) for chunk in chunks]
 
 # ─────────────────────────────────────────────────────────
@@ -238,7 +234,6 @@ def create_vector_store(documents: List[Document]) -> FAISS:
                 model="models/embedding-001",
                 google_api_key=GEMINI_API_KEY
             )
-            # 
             vector_store = FAISS.from_documents(documents, embeddings)
         return vector_store
     except Exception as e:
