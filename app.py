@@ -1,0 +1,379 @@
+"""
+🚀 Multi-Document RAG AI Agent with CAG & Voice Support
+─────────────────────────────────────────────────────────
+📋 Features:
+  ✅ Multi-file support: PDF, TXT, CSV, HTML, XML, GitHub Raw files
+  ✅ CAG (Context Augmented Generation) - Caches repeated queries for cost reduction
+  ✅ Overlapping Chunking - Better context preservation
+  ✅ 🌍 Multilingual support (15+ languages)
+  ✅ 🎙️ Text-to-Speech (TTS) using Edge-TTS
+  ✅ Response modes: Text & Voice
+  ✅ Gemini 2.5 Flash API integration
+  ✅ Fast responses within 1 minute
+─────────────────────────────────────────────────────────
+"""
+
+import streamlit as st
+import os
+import time
+from typing import List, Dict, Tuple, Optional
+from datetime import datetime
+import hashlib
+import json
+
+# PDF Processing
+import PyPDF2
+
+# Document Processing
+import csv
+import xml.etree.ElementTree as ET
+from html.parser import HTMLParser
+
+# Vector DB & Embeddings
+from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
+from langchain_community.vectorstores import FAISS
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.schema import Document
+from langchain.chains.retrieval_qa.base import RetrievalQA
+
+# TTS
+import edge_tts
+import asyncio
+
+# Web requests for GitHub raw files
+import requests
+
+# ─────────────────────────────────────────────────────────
+# 🔑 CONFIGURATION & SETUP
+# ─────────────────────────────────────────────────────────
+
+# Get API key from Streamlit secrets
+GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY")
+if not GEMINI_API_KEY:
+    st.error("❌ GEMINI_API_KEY not found in Streamlit secrets!")
+    st.stop()
+
+# Language dictionary
+LANGUAGE_DICT = {
+    "English": "en", "Spanish": "es", "Arabic": "ar", "French": "fr", 
+    "German": "de", "Hindi": "hi", "Tamil": "ta", "Bengali": "bn", 
+    "Japanese": "ja", "Korean": "ko", "Russian": "ru",
+    "Chinese (Simplified)": "zh-Hans", "Portuguese": "pt", "Italian": "it", 
+    "Dutch": "nl", "Turkish": "tr"
+}
+
+# Session state initialization
+if "documents" not in st.session_state:
+    st.session_state.documents = []
+if "vector_store" not in st.session_state:
+    st.session_state.vector_store = None
+if "query_cache" not in st.session_state:
+    st.session_state.query_cache = {}  # CAG cache
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+
+# ─────────────────────────────────────────────────────────
+# 📄 DOCUMENT LOADERS
+# ─────────────────────────────────────────────────────────
+
+def extract_text_from_pdf(pdf_file) -> str:
+    """Extract text from PDF file"""
+    try:
+        pdf_reader = PyPDF2.PdfReader(pdf_file)
+        text = ""
+        for page in pdf_reader.pages:
+            text += page.extract_text() + "\n"
+        return text
+    except Exception as e:
+        st.error(f"❌ Error reading PDF: {str(e)}")
+        return ""
+
+def extract_text_from_txt(txt_file) -> str:
+    """Extract text from TXT file"""
+    try:
+        return txt_file.read().decode('utf-8')
+    except Exception as e:
+        st.error(f"❌ Error reading TXT: {str(e)}")
+        return ""
+
+def extract_text_from_csv(csv_file) -> str:
+    """Extract text from CSV file"""
+    try:
+        csv_file.seek(0)
+        csv_reader = csv.reader(csv_file.read().decode('utf-8').splitlines())
+        text = ""
+        for row in csv_reader:
+            text += " | ".join(row) + "\n"
+        return text
+    except Exception as e:
+        st.error(f"❌ Error reading CSV: {str(e)}")
+        return ""
+
+def extract_text_from_html(html_file) -> str:
+    """Extract text from HTML file"""
+    try:
+        html_content = html_file.read().decode('utf-8')
+        
+        class HTMLTextExtractor(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.text = []
+            
+            def handle_data(self, data):
+                if data.strip():
+                    self.text.append(data.strip())
+        
+        extractor = HTMLTextExtractor()
+        extractor.feed(html_content)
+        return " ".join(extractor.text)
+    except Exception as e:
+        st.error(f"❌ Error reading HTML: {str(e)}")
+        return ""
+
+def extract_text_from_xml(xml_file) -> str:
+    """Extract text from XML file"""
+    try:
+        xml_content = xml_file.read().decode('utf-8')
+        root = ET.fromstring(xml_content)
+        text = ""
+        
+        def extract_all_text(elem):
+            nonlocal text
+            if elem.text:
+                text += elem.text.strip() + " "
+            for child in elem:
+                extract_all_text(child)
+            if elem.tail:
+                text += elem.tail.strip() + " "
+        
+        extract_all_text(root)
+        return text
+    except Exception as e:
+        st.error(f"❌ Error reading XML: {str(e)}")
+        return ""
+
+def extract_text_from_github_raw(url: str) -> str:
+    """Extract text from GitHub raw file URL"""
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        return response.text
+    except Exception as e:
+        st.error(f"❌ Error fetching GitHub raw file: {str(e)}")
+        return ""
+
+def process_uploaded_file(uploaded_file) -> Tuple[str, str]:
+    """Process uploaded file and return (text, file_type)"""
+    file_name = uploaded_file.name.lower()
+    
+    if file_name.endswith('.pdf'):
+        text = extract_text_from_pdf(uploaded_file)
+        return text, "PDF"
+    elif file_name.endswith('.txt'):
+        text = extract_text_from_txt(uploaded_file)
+        return text, "TXT"
+    elif file_name.endswith('.csv'):
+        text = extract_text_from_csv(uploaded_file)
+        return text, "CSV"
+    elif file_name.endswith('.html') or file_name.endswith('.htm'):
+        text = extract_text_from_html(uploaded_file)
+        return text, "HTML"
+    elif file_name.endswith('.xml'):
+        text = extract_text_from_xml(uploaded_file)
+        return text, "XML"
+    else:
+        st.warning(f"⚠️ Unsupported file type: {file_name}")
+        return "", "UNKNOWN"
+
+# ─────────────────────────────────────────────────────────
+# 🔄 OVERLAPPING CHUNKING STRATEGY
+# ─────────────────────────────────────────────────────────
+
+def create_overlapping_chunks(text: str, chunk_size: int = 1000, 
+                              overlap: int = 200) -> List[Document]:
+    """
+    Create overlapping chunks to preserve context
+    Better for semantic understanding
+    """
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=overlap,
+        separators=["\n\n", "\n", " ", ""]
+    )
+    chunks = splitter.split_text(text)
+    return [Document(page_content=chunk) for chunk in chunks]
+
+# ─────────────────────────────────────────────────────────
+# 🧠 VECTOR STORE & EMBEDDINGS
+# ─────────────────────────────────────────────────────────
+
+def create_vector_store(documents: List[Document]) -> FAISS:
+    """Create FAISS vector store from documents"""
+    if not documents:
+        return None
+    
+    try:
+        with st.spinner("🔄 Creating embeddings... Please wait"):
+            embeddings = GoogleGenerativeAIEmbeddings(
+                model="models/embedding-001",
+                google_api_key=GEMINI_API_KEY
+            )
+            vector_store = FAISS.from_documents(documents, embeddings)
+        return vector_store
+    except Exception as e:
+        st.error(f"❌ Error creating vector store: {str(e)}")
+        return None
+
+# ─────────────────────────────────────────────────────────
+# 💾 CAG (Context Augmented Generation) - Query Cache
+# ─────────────────────────────────────────────────────────
+
+def get_query_hash(query: str, language: str) -> str:
+    """Generate hash for query caching"""
+    query_key = f"{query.lower().strip()}_{language}"
+    return hashlib.md5(query_key.encode()).hexdigest()
+
+def check_query_cache(query: str, language: str) -> Optional[str]:
+    """Check if query response is cached (CAG)"""
+    cache_key = get_query_hash(query, language)
+    if cache_key in st.session_state.query_cache:
+        cached_response = st.session_state.query_cache[cache_key]
+        st.info(f"📦 Using cached response (CAG - Cost optimized)")
+        return cached_response
+    return None
+
+def cache_query_response(query: str, language: str, response: str):
+    """Cache query response for future use (CAG)"""
+    cache_key = get_query_hash(query, language)
+    st.session_state.query_cache[cache_key] = response
+
+# ─────────────────────────────────────────────────────────
+# 🎙️ TEXT-TO-SPEECH (Edge-TTS)
+# ─────────────────────────────────────────────────────────
+
+async def text_to_speech_async(text: str, language_code: str) -> Optional[bytes]:
+    """Convert text to speech using Edge-TTS"""
+    try:
+        voice_map = {
+            "en": "en-US-AriaNeural",
+            "es": "es-ES-AlvaroNeural",
+            "fr": "fr-FR-DeniseNeural",
+            "de": "de-DE-ConradNeural",
+            "hi": "hi-IN-MadhurNeural",
+            "ta": "ta-IN-ValluvarNeural",
+            "ja": "ja-JP-NanamiNeural",
+            "zh-Hans": "zh-CN-XiaoxiaoNeural",
+            "pt": "pt-BR-BrendaNeural",
+            "it": "it-IT-IsabellaNeural",
+            "ar": "ar-SA-LelaNeural",
+            "bn": "bn-IN-BashkarNeural",
+            "ko": "ko-KR-SunHiNeural",
+            "ru": "ru-RU-DariyaNeural",
+            "tr": "tr-TR-EmelNeural",
+            "nl": "nl-NL-ColetteNeural"
+        }
+        
+        voice = voice_map.get(language_code, "en-US-AriaNeural")
+        
+        communicate = edge_tts.Communicate(text, voice)
+        audio_file = io.BytesIO()
+        
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                audio_file.write(chunk["data"])
+        
+        audio_file.seek(0)
+        return audio_file.getvalue()
+    except Exception as e:
+        st.error(f"❌ TTS Error: {str(e)}")
+        return None
+
+def generate_speech(text: str, language_code: str) -> Optional[bytes]:
+    """Wrapper for async TTS"""
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        result = loop.run_until_complete(text_to_speech_async(text, language_code))
+        loop.close()
+        return result
+    except Exception as e:
+        st.error(f"❌ Speech generation failed: {str(e)}")
+        return None
+
+# ─────────────────────────────────────────────────────────
+# 🤖 RAG QUERY ENGINE
+# ─────────────────────────────────────────────────────────
+
+def query_rag(query: str, k: int = 5, language: str = "English") -> Dict:
+    """
+    Query RAG system with caching (CAG) support
+    Returns: {"answer": str, "sources": List, "response_time": float}
+    """
+    start_time = time.time()
+    language_code = LANGUAGE_DICT.get(language, "en")
+    
+    # Check CAG cache first
+    cached_response = check_query_cache(query, language)
+    if cached_response:
+        return {
+            "answer": cached_response,
+            "sources": ["📦 Cached Response (CAG)"],
+            "response_time": time.time() - start_time,
+            "from_cache": True
+        }
+    
+    if st.session_state.vector_store is None:
+        return {
+            "answer": "❌ No documents loaded. Please upload documents first.",
+            "sources": [],
+            "response_time": 0,
+            "from_cache": False
+        }
+    
+    try:
+        # Initialize LLM
+        llm = ChatGoogleGenerativeAI(
+            model="gemini-2.5-flash",
+            google_api_key=GEMINI_API_KEY,
+            temperature=0.7,
+            max_output_tokens=1024
+        )
+        
+        # Create RAG chain
+        qa_chain = RetrievalQA.from_chain_type(
+            llm=llm,
+            chain_type="stuff",
+            retriever=st.session_state.vector_store.as_retriever(search_kwargs={"k": k}),
+            return_source_documents=True,
+            verbose=False
+        )
+        
+        # Query in English first, then translate system
+        result = qa_chain({"query": query})
+        
+        answer = result.get("result", "No answer found")
+        sources = [doc.page_content[:100] for doc in result.get("source_documents", [])]
+        
+        # Cache the response
+        cache_query_response(query, language, answer)
+        
+        response_time = time.time() - start_time
+        
+        return {
+            "answer": answer,
+            "sources": sources,
+            "response_time": response_time,
+            "from_cache": False
+        }
+    
+    except Exception as e:
+        return {
+            "answer": f"❌ Error during RAG query: {str(e)}",
+            "sources": [],
+            "response_time": time.time() - start_time,
+            "from_cache": False
+        }
+
+# ─────────────────────────────────────────────────────────
+# 🎨 STREAMLIT UI
+# ─────────────────
