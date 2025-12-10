@@ -1,16 +1,19 @@
 streamlit
 google-genai
-llama-index
-llama-index-llms-google-genai
-llama-index-embeddings-google-genai
+llama-index>=0.11.0 # Use a modern version of the core library
+llama-index-llms-gemini # Corrected package name for the LLM
+llama-index-embeddings-gemini # Corrected package name for the Embeddings
+
 # Loaders for various file formats
 llama-index-readers-file
 llama-index-readers-web
-# Additional file handlers (may need system-level install for some)
+llama-index-core # Explicitly include core for stability
+# Document Parsing Tools (for PDF, CSV, XML, etc.)
 pypdf
 openpyxl
-unstructured # For CSV, HTML, XML, etc.
+unstructured
+
 # For Text-to-Speech using Edge-TTS
 edge-tts
-# For Caching (optional, but good for cost)
+# For Caching (CAG implementation)
 cachetools
