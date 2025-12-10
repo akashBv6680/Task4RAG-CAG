@@ -1,15 +1,15 @@
 streamlit
 # PDF Processing
 PyPDF2
-# Document Processing
-# csv and xml.etree.ElementTree are in the standard library, but requests is needed for GitHub raw files
+# Web Requests (for GitHub)
 requests
-# LangChain, Vector DB & Embeddings
+# LangChain Core and Integrations
 langchain
 langchain-google-genai
 langchain-community
+# Text Splitter Component (Crucial for resolving the error)
+langchain-text-splitters 
+# Vector Store
 faiss-cpu
 # TTS
 edge-tts
-# Utilities and Typing
-# The standard library modules (os, time, typing, datetime, hashlib, json, csv, xml.etree) are not listed
