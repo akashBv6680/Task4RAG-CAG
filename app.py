@@ -20,7 +20,7 @@ from typing import List, Dict, Tuple, Optional
 from datetime import datetime
 import hashlib
 import json
-import io # <--- ADDED: Needed for BytesIO in TTS function
+import io # <--- ESSENTIAL: Added for BytesIO in TTS function
 
 # PDF Processing
 import PyPDF2
@@ -33,10 +33,13 @@ from html.parser import HTMLParser
 # Vector DB & Embeddings
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_community.vectorstores import FAISS
-# This line caused the error. Keeping it, but dependency must be correct.
-from langchain.text_splitter import RecursiveCharacterTextSplitter 
+# 🚨 CORRECTED IMPORT PATH 🚨
+from langchain_text_splitters import RecursiveCharacterTextSplitter 
 from langchain.schema import Document
-from langchain.chains.retrieval_qa.base import RetrievalQA
+# RetrievalQA is often still available here, but its location is sometimes unstable. 
+# We'll keep it as-is for now, but be ready to change to 'from langchain.chains import RetrievalQA' 
+# or use the new chain creation methods if this fails.
+from langchain.chains.retrieval_qa.base import RetrievalQA 
 
 # TTS
 import edge_tts
@@ -50,7 +53,6 @@ import requests
 # ─────────────────────────────────────────────────────────
 
 # Get API key from Streamlit secrets
-# Ensure you have a secrets.toml file in .streamlit/
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
     st.error("❌ GEMINI_API_KEY not found in Streamlit secrets!")
@@ -107,9 +109,8 @@ def extract_text_from_csv(csv_file) -> str:
     """Extract text from CSV file"""
     try:
         csv_file.seek(0)
-        # Read file content as string
-        content_string = csv_file.read().decode('utf-8')
         # Use io.StringIO to treat the string as a file for the CSV reader
+        content_string = csv_file.read().decode('utf-8')
         reader = csv.reader(io.StringIO(content_string).readlines())
         text = ""
         for row in reader:
@@ -178,7 +179,6 @@ def process_uploaded_file(uploaded_file) -> Tuple[str, str]:
     """Process uploaded file and return (text, file_type)"""
     file_name = uploaded_file.name.lower()
     
-    # Check if a file object is present (Streamlit handles file upload objects)
     if uploaded_file is None:
         return "", "NONE"
 
@@ -220,6 +220,7 @@ def create_overlapping_chunks(text: str, chunk_size: int = 1000,
         separators=["\n\n", "\n", " ", ""]
     )
     chunks = splitter.split_text(text)
+    # 
     return [Document(page_content=chunk) for chunk in chunks]
 
 # ─────────────────────────────────────────────────────────
@@ -237,8 +238,7 @@ def create_vector_store(documents: List[Document]) -> FAISS:
                 model="models/embedding-001",
                 google_api_key=GEMINI_API_KEY
             )
-            # FAISS.from_documents can handle an empty list if not checked, but 
-            # we check 'documents' above anyway.
+            # 
             vector_store = FAISS.from_documents(documents, embeddings)
         return vector_store
     except Exception as e:
@@ -249,6 +249,7 @@ def handle_upload_and_processing(uploaded_files, github_url):
     """Handles file uploads, GitHub URL and processing to create the vector store."""
     all_chunks = []
     
+    # Process uploaded files
     if uploaded_files:
         for file in uploaded_files:
             text, file_type = process_uploaded_file(file)
@@ -256,6 +257,7 @@ def handle_upload_and_processing(uploaded_files, github_url):
                 all_chunks.extend(create_overlapping_chunks(text))
                 st.session_state.documents.append(file.name)
     
+    # Process GitHub URL
     if github_url and github_url.strip():
         text = extract_text_from_github_raw(github_url.strip())
         if text:
@@ -300,24 +302,13 @@ def cache_query_response(query: str, language: str, response: str):
 
 async def text_to_speech_async(text: str, language_code: str) -> Optional[bytes]:
     """Convert text to speech using Edge-TTS"""
-    # NOTE: The TTS function is wrapped in a try/except, which is good.
     try:
         voice_map = {
-            "en": "en-US-AriaNeural",
-            "es": "es-ES-AlvaroNeural",
-            "fr": "fr-FR-DeniseNeural",
-            "de": "de-DE-ConradNeural",
-            "hi": "hi-IN-MadhurNeural",
-            "ta": "ta-IN-ValluvarNeural",
-            "ja": "ja-JP-NanamiNeural",
-            "zh-Hans": "zh-CN-XiaoxiaoNeural",
-            "pt": "pt-BR-BrendaNeural",
-            "it": "it-IT-IsabellaNeural",
-            "ar": "ar-SA-LelaNeural",
-            "bn": "bn-IN-BashkarNeural",
-            "ko": "ko-KR-SunHiNeural",
-            "ru": "ru-RU-DariyaNeural",
-            "tr": "tr-TR-EmelNeural",
+            "en": "en-US-AriaNeural", "es": "es-ES-AlvaroNeural", "fr": "fr-FR-DeniseNeural", 
+            "de": "de-DE-ConradNeural", "hi": "hi-IN-MadhurNeural", "ta": "ta-IN-ValluvarNeural", 
+            "ja": "ja-JP-NanamiNeural", "zh-Hans": "zh-CN-XiaoxiaoNeural", "pt": "pt-BR-BrendaNeural", 
+            "it": "it-IT-IsabellaNeural", "ar": "ar-SA-LelaNeural", "bn": "bn-IN-BashkarNeural", 
+            "ko": "ko-KR-SunHiNeural", "ru": "ru-RU-DariyaNeural", "tr": "tr-TR-EmelNeural", 
             "nl": "nl-NL-ColetteNeural"
         }
         
@@ -333,13 +324,11 @@ async def text_to_speech_async(text: str, language_code: str) -> Optional[bytes]
         audio_file.seek(0)
         return audio_file.getvalue()
     except Exception as e:
-        # st.error is not for async context, but kept for consistency
         print(f"❌ TTS Error: {str(e)}") 
         return None
 
 def generate_speech(text: str, language_code: str) -> Optional[bytes]:
     """Wrapper for async TTS"""
-    # This wrapper is necessary because Streamlit and Edge-TTS use different async patterns
     try:
         # Create a new event loop for synchronous execution
         loop = asyncio.new_event_loop()
@@ -399,10 +388,7 @@ def query_rag(query: str, k: int = 5, language: str = "English") -> Dict:
             verbose=False
         )
         
-        # Query (The query is implicitly translated by the LLM's multi-lingual ability)
-        # However, for RAG, the query should be in the document language. 
-        # For multi-lingual RAG, the prompt should encourage the LLM to answer in the 
-        # requested language.
+        # Ask the LLM to answer in the selected language
         full_query = f"Answer the following question in {language}: {query}"
         
         result = qa_chain({"query": full_query})
