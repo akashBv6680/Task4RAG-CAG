@@ -20,7 +20,7 @@ from typing import List, Dict, Tuple, Optional
 from datetime import datetime
 import hashlib
 import io
-import asyncio # Required for Edge-TTS wrapper
+import asyncio
 
 # PDF Processing
 import PyPDF2
@@ -32,10 +32,11 @@ from html.parser import HTMLParser
 
 # Vector DB & Embeddings
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
-from langchain_community.vectorstores import FAISS
+# 🚨 Vector Store Change: Importing Chroma 🚨
+from langchain_community.vectorstores import Chroma 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
-# 🚨 FINAL FIX for LangChain 0.1.14: Use the base package shim 🚨
+# 🚨 RetrievalQA Fix: Using the base LangChain import (stable in 0.2.x) 🚨
 from langchain.chains import RetrievalQA
 
 # TTS
@@ -89,7 +90,7 @@ if not GEMINI_API_KEY:
 LANGUAGE_DICT = {
     "English": "en", "Spanish": "es", "Arabic": "ar", "French": "fr", 
     "German": "de", "Hindi": "hi", "Tamil": "ta", "Bengali": "bn", 
-    "Japanese": "ja", "ko": "ko", "Russian": "ru",
+    "Japanese": "ja", "Korean": "ko", "Russian": "ru",
     "Chinese (Simplified)": "zh-Hans", "Portuguese": "pt", "Italian": "it", 
     "Dutch": "nl", "Turkish": "tr"
 }
@@ -109,7 +110,7 @@ if "selected_language" not in st.session_state:
     st.session_state.selected_language = "English"
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 📄 DOCUMENT LOADERS
+# 📄 DOCUMENT LOADERS (Unchanged)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def extract_text_from_pdf(pdf_file) -> str:
@@ -230,7 +231,7 @@ def process_uploaded_file(uploaded_file) -> Tuple[str, str]:
         return "", "UNKNOWN"
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 🔄 OVERLAPPING CHUNKING STRATEGY
+# 🔄 OVERLAPPING CHUNKING STRATEGY (Unchanged)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def create_overlapping_chunks(text: str, chunk_size: int = 1000, 
@@ -251,23 +252,23 @@ def create_overlapping_chunks(text: str, chunk_size: int = 1000,
     return [Document(page_content=chunk) for chunk in chunks]
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 🧠 VECTOR STORE & EMBEDDINGS
+# 🧠 VECTOR STORE & EMBEDDINGS (Updated for Chroma)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def create_vector_store(documents: List[Document]) -> Optional[FAISS]:
-    """Create FAISS vector store from documents"""
+def create_vector_store(documents: List[Document]) -> Optional[Chroma]: 
+    """Create Chroma vector store from documents"""
     if not documents:
         st.warning("⚠️ No documents to process")
         return None
     
     try:
         with st.spinner("🔄 Creating embeddings with Gemini... This may take a minute"):
-            # 
             embeddings = GoogleGenerativeAIEmbeddings(
                 model="models/embedding-001",
                 google_api_key=GEMINI_API_KEY
             )
-            vector_store = FAISS.from_documents(documents, embeddings)
+            # Use Chroma.from_documents
+            vector_store = Chroma.from_documents(documents, embeddings)
             st.success(f"✅ Created vector store with {len(documents)} chunks!")
         return vector_store
     except Exception as e:
@@ -278,9 +279,9 @@ def handle_upload_and_processing(uploaded_files, github_url):
     """Process uploaded files and GitHub URLs"""
     all_chunks = []
     
-    st.session_state.documents = [] # Clear old list
-    st.session_state.vector_store = None # Clear old store
-    st.session_state.query_cache = {} # Clear cache for new documents
+    st.session_state.documents = []
+    st.session_state.vector_store = None
+    st.session_state.query_cache = {} 
 
     # Process uploaded files
     if uploaded_files:
@@ -311,7 +312,7 @@ def handle_upload_and_processing(uploaded_files, github_url):
         st.warning("⚠️ No extractable content found. Please check your files.")
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 💾 CAG (Context Augmented Generation) - Query Cache
+# 💾 CAG (Context Augmented Generation) - Query Cache (Unchanged)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def get_query_hash(query: str, language: str) -> str:
@@ -321,7 +322,7 @@ def get_query_hash(query: str, language: str) -> str:
 
 def check_query_cache(query: str, language: str) -> Optional[str]:
     """Check if query response is cached (CAG)"""
-    cache_key = get_query_hash(query, language)
+    cache_key = get_query_cache(query, language)
     return st.session_state.query_cache.get(cache_key)
 
 def cache_query_response(query: str, language: str, response: str):
@@ -330,13 +331,12 @@ def cache_query_response(query: str, language: str, response: str):
     st.session_state.query_cache[cache_key] = response
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 🎙️ TEXT-TO-SPEECH (Edge-TTS)
+# 🎙️ TEXT-TO-SPEECH (Edge-TTS) (Unchanged)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 async def text_to_speech_async(text: str, language_code: str) -> Optional[bytes]:
     """Convert text to speech using Edge-TTS"""
     try:
-        # NOTE: Updated voice map to match common language codes for better reliability
         voice_map = {
             "en": "en-US-AriaNeural", "es": "es-ES-AlvaroNeural", "fr": "fr-FR-DeniseNeural", 
             "de": "de-DE-ConradNeural", "hi": "hi-IN-MadhurNeural", "ta": "ta-IN-ValluvarNeural", 
@@ -378,7 +378,7 @@ def generate_speech(text: str, language_code: str) -> Optional[bytes]:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 🤖 RAG QUERY ENGINE
+# 🤖 RAG QUERY ENGINE (Unchanged in logic)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def query_rag(query: str, k: int = 5, language: str = "English") -> Dict:
@@ -417,7 +417,7 @@ def query_rag(query: str, k: int = 5, language: str = "English") -> Dict:
         )
         
         # Create RAG chain
-        # RetrievalQA uses the vector store as the retriever
+        # RetrievalQA works with Chroma's retriever method just like FAISS's
         qa_chain = RetrievalQA.from_chain_type(
             llm=llm,
             chain_type="stuff",
@@ -456,7 +456,7 @@ def query_rag(query: str, k: int = 5, language: str = "English") -> Dict:
         }
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 🎨 STREAMLIT UI
+# 🎨 STREAMLIT UI (Unchanged)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def main_ui():
