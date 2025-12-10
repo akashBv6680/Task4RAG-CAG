@@ -1,18 +1,24 @@
-streamlit
-# PDF Processing
-PyPDF2
-# Web Requests (for GitHub)
-requests
+streamlit==1.32.0
+PyPDF2==4.0.1
+requests==2.31.0
 # LangChain Core and Integrations
-langchain
-langchain-google-genai
-# Contains FAISS, RetrievalQA base code, and other community tools
-langchain-community
-# Text Splitter Component
-langchain-text-splitters 
-# Document Object
-langchain-core
+langchain==0.1.14
+langchain-core==0.1.33
+langchain-community==0.0.26
+langchain-google-genai==0.0.13
+langchain-text-splitters
+# Gemini LLM dependency
+google-generativeai==0.3.5
 # Vector Store
-faiss-cpu
+faiss-cpu==1.7.4
 # TTS
-edge-tts
+edge-tts==6.1.13
+# Document parsing dependencies (for HTML/XML robustness)
+beautifulsoup4==4.12.2
+lxml==4.9.3
+# Other utilities (included for completeness, though not strictly used in current code)
+pandas==2.1.3
+numpy==1.24.3
+nltk==3.8.1
+python-dotenv==1.0.0
+aiohttp==3.9.1
