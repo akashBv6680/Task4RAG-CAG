@@ -4,14 +4,14 @@ from google.genai.errors import APIError
 from llama_index.core import VectorStoreIndex, SimpleDirectoryReader, Settings
 from llama_index.core.node_parser import SentenceSplitter
 
-# ----------------- 🛠️ FIX 1: CORRECTED LLM & EMBEDDING IMPORTS 🛠️ -----------------
-# Importing from 'llama_index.llms.gemini' and 'llama_index.embeddings.gemini' 
-# requires the packages 'llama-index-llms-gemini' and 'llama-index-embeddings-gemini'
 from llama_index.llms.gemini import Gemini
 from llama_index.embeddings.gemini import GeminiEmbedding
-# ------------------------------------------------------------------------------------
 
-from edge_tts import communicate
+# ----------------- 🛠️ FIX 3: CORRECTED EDGE-TTS IMPORT 🛠️ -----------------
+# The function/class is named 'Communicate' with a capital C
+from edge_tts import Communicate # Changed from 'communicate'
+# -------------------------------------------------------------------------
+
 import asyncio
 import io
 import time
@@ -21,9 +21,9 @@ from cachetools import LRUCache
 MODEL_NAME = "gemini-2.5-flash"
 EMBED_MODEL = "models/text-embedding-004" 
 CHUNK_SIZE = 1024       
-CHUNK_OVERLAP = 256     # Overlapping chunking overlap
-CACHE_SIZE = 100        # Size for the LRU (Least Recently Used) cache
-CACHE_TTL = 3600        # Cache time-to-live in seconds (1 hour)
+CHUNK_OVERLAP = 256     
+CACHE_SIZE = 100        
+CACHE_TTL = 3600        
 
 # Multi-language support dictionary
 LANGUAGE_DICT = {
@@ -32,7 +32,7 @@ LANGUAGE_DICT = {
     "Chinese (Simplified)": "zh-Hans", "Portuguese": "pt", "Italian": "it", "Dutch": "nl", "Turkish": "tr"
 }
 
-# Edge-TTS voice mapping (simplified mapping for multiple languages)
+# Edge-TTS voice mapping
 TTS_VOICE_MAP = {
     "en": "en-US-Standard-C", "es": "es-ES-ElviraNeural", "fr": "fr-FR-HenriNeural", 
     "hi": "hi-IN-MadhurNeural", "ta": "ta-IN-ValluvarNeural", "ja": "ja-JP-NanamiNeural", 
@@ -71,13 +71,11 @@ def initialize_llm_and_embedding():
     """Initializes and configures Gemini LLM and Embedding Model via LlamaIndex Settings."""
     if "GEMINI_API_KEY" not in os.environ:
         try:
-            # Assumes the key is set in Streamlit Secrets
             os.environ["GEMINI_API_KEY"] = st.secrets["gemini_api_key"]
         except Exception:
             st.error("🚨 Gemini API Key not found in environment variables or Streamlit secrets. Please set it.")
             st.stop()
             
-    # LlamaIndex Global Settings
     Settings.llm = Gemini(model=MODEL_NAME, api_key=os.environ["GEMINI_API_KEY"])
     Settings.embed_model = GeminiEmbedding(model_name=EMBED_MODEL, api_key=os.environ["GEMINI_API_KEY"])
     Settings.node_parser = SentenceSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
@@ -89,17 +87,13 @@ def load_documents(uploaded_files, temp_dir="temp_data"):
     if not os.path.exists(temp_dir):
         os.makedirs(temp_dir)
     
-    # Clear previous files to avoid mixing contexts from different runs
     for f in os.listdir(temp_dir):
         os.remove(os.path.join(temp_dir, f))
         
     for file in uploaded_files:
         file_path = os.path.join(temp_dir, file.name)
         with open(file_path, "wb") as f:
-            # ----------------- 🛠️ FIX 2: CORRECTED FILE READING 🛠️ -----------------
-            # Use .getvalue() to get the file's binary content
             f.write(file.getvalue()) 
-            # -----------------------------------------------------------------------
             
     loader = SimpleDirectoryReader(input_dir=temp_dir, recursive=True)
     documents = loader.load_data()
@@ -118,10 +112,13 @@ def get_index(uploaded_files):
 
 def generate_voice_response(text, lang_code):
     """Generates audio for a given text using Edge-TTS."""
-    voice = TTS_VOICE_MAP.get(lang_code, "en-US-Standard-C") # Fallback to English
+    voice = TTS_VOICE_MAP.get(lang_code, "en-US-Standard-C")
     
     async def tts_main():
-        comm = communicate(text, voice)
+        # ----------------- 🛠️ FIX 3: CORRECTED FUNCTION CALL 🛠️ -----------------
+        # Call the imported Communicate class
+        comm = Communicate(text, voice) 
+        # ----------------------------------------------------------------------
         audio_buffer = io.BytesIO()
         async for chunk in comm:
             if chunk["type"] == "audio":
@@ -133,8 +130,7 @@ def generate_voice_response(text, lang_code):
         audio_data = asyncio.run(tts_main())
         return audio_data
     except Exception as e:
-        # Note: Streamlit's environment can sometimes have issues with Edge-TTS
-        st.error(f"TTS Error: Could not generate voice response. {e}")
+        st.error(f"TTS Error: Could not generate voice response. Check Edge-TTS installation or Streamlit thread compatibility. Details: {e}")
         return None
 
 
