@@ -37,8 +37,8 @@ from langchain_community.vectorstores import FAISS
 from langchain_text_splitters import RecursiveCharacterTextSplitter 
 # 🚨 FIX 2: Corrected path for Document object
 from langchain_core.documents import Document
-# 🚨 FIX 3: Corrected path for RetrievalQA 🚨
-from langchain.chains import RetrievalQA 
+# 🚨 FINAL FIX: Corrected path for RetrievalQA to use the community package 🚨
+from langchain_community.chains import RetrievalQA 
 
 # TTS
 import edge_tts
@@ -376,6 +376,7 @@ def query_rag(query: str, k: int = 5, language: str = "English") -> Dict:
         )
         
         # Create RAG chain
+        # RetrievalQA is accessed via the direct import from langchain_community.chains
         qa_chain = RetrievalQA.from_chain_type(
             llm=llm,
             chain_type="stuff",
