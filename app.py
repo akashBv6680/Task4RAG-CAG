@@ -37,8 +37,8 @@ from langchain_community.vectorstores import FAISS
 from langchain_text_splitters import RecursiveCharacterTextSplitter 
 # 🚨 FIX 2: Corrected path for Document object
 from langchain_core.documents import Document
-# RetrievalQA chain
-from langchain.chains.retrieval_qa.base import RetrievalQA 
+# 🚨 FIX 3: Corrected path for RetrievalQA 🚨
+from langchain.chains import RetrievalQA 
 
 # TTS
 import edge_tts
@@ -234,6 +234,7 @@ def create_vector_store(documents: List[Document]) -> FAISS:
                 model="models/embedding-001",
                 google_api_key=GEMINI_API_KEY
             )
+            # 
             vector_store = FAISS.from_documents(documents, embeddings)
         return vector_store
     except Exception as e:
