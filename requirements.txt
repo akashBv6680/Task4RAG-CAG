@@ -1,19 +1,29 @@
+# Requirements for Streamlit RAG Chatbot with Gemini API and ChromaDB
+
+# Streamlit framework
 streamlit
+
+# Google Gemini API SDK
 google-genai
-llama-index>=0.11.0 # Use a modern version of the core library
-llama-index-llms-gemini # Corrected package name for the LLM
-llama-index-embeddings-gemini # Corrected package name for the Embeddings
 
-# Loaders for various file formats
-llama-index-readers-file
-llama-index-readers-web
-llama-index-core # Explicitly include core for stability
-# Document Parsing Tools (for PDF, CSV, XML, etc.)
-pypdf
-openpyxl
-unstructured
+# Vector Store (ChromaDB) and its dependencies
+chromadb
+pysqlite3-binary  # CRITICAL for Streamlit Cloud deployment with ChromaDB
 
-# For Text-to-Speech using Edge-TTS
-edge-tts
-# For Caching (CAG implementation)
-cachetools
+# Components from the LangChain ecosystem
+langchain-text-splitters
+langchain-core # Often needed for traceable (LangSmith) components
+langsmith # For tracing/monitoring
+
+# Embedding model dependency
+sentence-transformers
+
+# Document Loaders/Parsers
+pypdf            # For PDF processing
+requests         # For fetching GitHub URLs
+pandas           # For CSV processing
+lxml             # For XML/HTML parsing
+beautifulsoup4   # For HTML/XML parsing
+
+# Text-to-Speech
+edge-tts         # For TTS functionality
