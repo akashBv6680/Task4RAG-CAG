@@ -56,9 +56,9 @@ from langsmith import traceable, tracing_context
 COLLECTION_NAME = "rag_documents"
 EMBEDDING_MODEL = "all-MiniLM-L6-v2" 
 
-# *** CRITICAL FIX: Read API Key from Streamlit Secrets ***
+# *** CRITICAL: Read API Key from Streamlit Secrets ***
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY")
-GEMINI_MODEL_ID = "gemini-2.5-flash"  # Using the requested model_name
+GEMINI_MODEL_ID = "gemini-2.5-flash"
 
 if not GEMINI_API_KEY:
     st.warning("🚨 GEMINI_API_KEY is not set in Streamlit Secrets. Please set it to proceed.")
@@ -192,21 +192,17 @@ def extract_text_from_pdf(uploaded_file):
 
 def extract_text_from_csv(uploaded_file):
     """Extracts text from an uploaded CSV file."""
-    # Use StringIO to read byte stream as text
     stringio = io.StringIO(uploaded_file.getvalue().decode("utf-8"))
     df = pd.read_csv(stringio)
-    return df.to_markdown(index=False) # Convert to Markdown table for better LLM context
+    return df.to_markdown(index=False) 
 
 def extract_text_from_html(uploaded_file):
     """Extracts main text content from an uploaded HTML file."""
     content = uploaded_file.getvalue().decode("utf-8")
     soup = BeautifulSoup(content, 'lxml')
-    # Remove script and style elements
     for script_or_style in soup(["script", "style"]):
         script_or_style.decompose()
-    # Get text
     text = soup.get_text()
-    # Break into lines and remove excess whitespace
     lines = (line.strip() for line in text.splitlines())
     chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
     return '\n'.join(chunk for chunk in chunks if chunk)
@@ -215,13 +211,13 @@ def extract_text_from_xml(uploaded_file):
     """Extracts all text content from an uploaded XML file."""
     content = uploaded_file.getvalue().decode("utf-8")
     soup = BeautifulSoup(content, 'lxml')
-    return soup.get_text(separator=' ', strip=True) # Simple text extraction
+    return soup.get_text(separator=' ', strip=True) 
 
 def split_documents(text_data, chunk_size=1000, chunk_overlap=200): 
     """Splits a single string of text into chunks with overlapping."""
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap, # Overlapping chunking implemented here
+        chunk_overlap=chunk_overlap,
         length_function=len,
         is_separator_regex=False,
     )
@@ -267,7 +263,6 @@ def retrieve_documents(query, n_results=5):
 # --- CAG (Context Augmentation Generation) Implementation ---
 def get_chat_history_for_cag():
     """Compiles the last few turns of chat history for context."""
-    # Use last 4 messages (2 user/2 assistant turns) for a concise, efficient context window
     history = st.session_state.messages[-4:] 
     history_str = "\n".join([f"{msg['role'].capitalize()}: {msg['content']}" for msg in history])
     return history_str
@@ -346,14 +341,14 @@ def handle_user_input():
         try:
             with st.spinner("Generating speech..."):
                 selected_language_code = LANGUAGE_DICT[st.session_state.selected_language]
-                # THIS IS WHERE nest_asyncio MAKES asyncio.run WORK
+                # nest_asyncio allows this asynchronous call to work
                 audio_bytes = asyncio.run(generate_tts(st.session_state.tts_to_play, selected_language_code))
                 st.audio(audio_bytes, format='audio/mp3', start_time=0)
             del st.session_state['tts_to_play']
         except Exception as e:
             st.error(f"Failed to generate or play voice: {e}")
             del st.session_state['tts_to_play']
-        return # Do not process chat input if playing TTS
+        return 
 
     # 2. Chat Input Handler
     if prompt := st.chat_input("Ask about your document..."):
@@ -372,7 +367,7 @@ def handle_user_input():
                     try:
                         # Auto-play TTS immediately after generation if Voice mode is on
                         with st.spinner("Generating voice response..."):
-                            # THIS IS WHERE nest_asyncio MAKES asyncio.run WORK
+                            # nest_asyncio allows this asynchronous call to work
                             audio_bytes = asyncio.run(generate_tts(response, selected_language_code))
                             st.audio(audio_bytes, format='audio/mp3', start_time=0)
                     except Exception as e:
@@ -570,7 +565,6 @@ def main_ui():
     handle_user_input()
 
 if __name__ == "__main__":
-    # Ensure asyncio is available for Edge-TTS on Windows (still needed for some environments)
     if sys.platform == "win32" and sys.version_info >= (3, 8):
         try:
             asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
