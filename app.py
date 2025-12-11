@@ -566,7 +566,6 @@ def main_ui():
         st.markdown("---")
         
         # New Chat button with RAG Data clearing
-        # FIX: Ensure st.rerun() is used
         if st.button("🔄 Start New Chat & Clear RAG Data", use_container_width=True):
             clear_chroma_data() 
             st.session_state.chat_history = {} 
@@ -576,7 +575,6 @@ def main_ui():
             st.rerun() 
 
         # New Chat button (keeps RAG data)
-        # FIX: Ensure st.rerun() is used
         if st.button("➕ Start New Chat (Keep Documents)", use_container_width=True):
             create_new_chat(save_current=True) 
             st.rerun()
@@ -608,7 +606,6 @@ def main_ui():
                         st.session_state.current_chat_id = chat_id
                         st.session_state.messages = chat_data['messages'] 
                         st.session_state.cag_cache = {} 
-                        # FIX: Ensure st.rerun() is used
                         st.rerun() 
                     st.caption(date_str)
 
