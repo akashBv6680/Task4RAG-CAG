@@ -25,36 +25,9 @@ CHUNK_OVERLAP = 256
 CACHE_SIZE = 100        
 CACHE_TTL = 3600        
 
-# Multi-language support dictionary (Updated to ensure all 17 languages are present and Hindi/Tamil/Bengali have local scripts for clarity)
+# --- 2. Corrected LANGUAGE_DICT (17 Languages with Local Scripts) ---
 LANGUAGE_DICT = {
     # 17 Languages: Key is Display Name, Value is ISO 639-1 code for RAG/TTS
-    "English": "en", 
-    "Hindi (हिन्दी)": "hi", 
-    "Tamil (தமிழ்)": "ta", 
-    "Bengali (বাংলা)": "bn", # Added local script for Bengali
-    "Spanish": "es", 
-    "French": "fr", 
-    "German": "de", 
-    "Arabic": "ar", 
-    "Japanese (日本語)": "ja", 
-    "Korean (한국어)": "ko", 
-    "Russian (русский)": "ru",
-    "Chinese (Simplified)": "zh-Hans", 
-    "Portuguese": "pt", 
-    "Italian": "it", 
-    "Dutch": "nl", 
-    "Turkish": "tr",
-    # 17th language from original list: Re-added 
-    # (Checking original list provided in context - it was implicitly 17, confirming all are here now)
-    "Telugu (తెలుగు)": "te" # Adding one more common Indian language to round off the list if needed, or stick to the original list's implicit count. STICKING TO ORIGINAL LIST COUNT LOGIC
-}
-
-# Re-verifying the original 17 languages from your past code:
-# "English", "Spanish", "Arabic", "French", "German", "Hindi", "Tamil", "Bengali", 
-# "Japanese", "Korean", "Russian", "Chinese (Simplified)", "Portuguese", "Italian", 
-# "Dutch", "Turkish" (16 languages listed explicitly, 17th was implied or a count error).
-# Using the 16 explicit languages and adding a 17th common language for completeness:
-LANGUAGE_DICT = {
     "English": "en", 
     "Hindi (हिन्दी)": "hi", 
     "Tamil (தமிழ்)": "ta", 
@@ -71,36 +44,36 @@ LANGUAGE_DICT = {
     "Italian": "it", 
     "Dutch": "nl", 
     "Turkish": "tr",
-    "Telugu (తెలుగు)": "te" # Added Telugu to make it a solid 17 languages.
+    "Telugu (తెలుగు)": "te" # Added to ensure a solid 17 languages
 }
 
 
-# Edge-TTS Voice Map (Updated to include Telugu)
+# Edge-TTS Voice Map (Updated for all 17 languages)
 TTS_VOICE_MAP = {
-    "en": "en-US-AriaNeural",      # English
-    "es": "es-ES-ElviraNeural",      # Spanish
-    "fr": "fr-FR-HenriNeural",      # French
-    "hi": "hi-IN-SwaraNeural",      # Hindi
-    "ta": "ta-IN-ValluvarNeural",    # Tamil
-    "bn": "bn-IN-BashkarNeural",    # Bengali
-    "ja": "ja-JP-NanamiNeural",      # Japanese
-    "ko": "ko-KR-JiMinNeural",      # Korean
-    "zh-Hans": "zh-CN-XiaoxiaoNeural", # Simplified Chinese
-    "pt": "pt-PT-FernandaNeural",    # Portuguese
-    "ar": "ar-SA-HamedNeural",      # Arabic
-    "de": "de-DE-KatjaNeural",      # German
-    "it": "it-IT-ElsaNeural",      # Italian
-    "nl": "nl-NL-ColetteNeural",    # Dutch
-    "tr": "tr-TR-AhmetNeural",      # Turkish
-    "ru": "ru-RU-DariyaNeural",      # Russian
-    "te": "te-IN-ShrutiNeural"       # Telugu (Added for completeness)
+    "en": "en-US-AriaNeural",      
+    "es": "es-ES-ElviraNeural",      
+    "fr": "fr-FR-HenriNeural",      
+    "hi": "hi-IN-SwaraNeural",      
+    "ta": "ta-IN-ValluvarNeural",    
+    "bn": "bn-IN-BashkarNeural",    
+    "ja": "ja-JP-NanamiNeural",      
+    "ko": "ko-KR-JiMinNeural",      
+    "zh-Hans": "zh-CN-XiaoxiaoNeural", 
+    "pt": "pt-PT-FernandaNeural",    
+    "ar": "ar-SA-HamedNeural",      
+    "de": "de-DE-KatjaNeural",      
+    "it": "it-IT-ElsaNeural",      
+    "nl": "nl-NL-ColetteNeural",    
+    "tr": "tr-TR-AhmetNeural",
+    "ru": "ru-RU-DariyaNeural",
+    "te": "te-IN-ShrutiNeural"       
 }
 
 # Initialize a simple LRU cache for final responses (CAG cost reduction)
 if 'response_cache' not in st.session_state:
     st.session_state.response_cache = LRUCache(maxsize=CACHE_SIZE)
 
-# --- 2. Streamlit UI Components (Top Banner) ---
+# --- 3. Streamlit UI Components (Top Banner) ---
 st.set_page_config(
     page_title="Multilingual RAG AI Agent with Gemini 2.5 Flash",
     layout="wide",
@@ -111,12 +84,12 @@ st.title("📄💬 Multi-Lingual RAG AI Agent with Gemini 2.5 Flash")
 st.markdown("""
 ### ✨ System Status & Features
 - **RAG System:** Supports diverse document formats.
-- **Language Support:** **Multi-lingual** RAG response in 17+ languages, controlled by user selection.
+- **Language Support:** **Multi-lingual** RAG response in 17 languages, controlled by user selection.
 - **Voice Mode:** Supports **Text-to-Speech (TTS)** using Edge-TTS in the selected language.
 """)
 st.divider()
 
-# --- 3. Helper Functions ---
+# --- 4. Helper Functions ---
 @st.cache_resource
 def initialize_llm_and_embedding():
     """Initializes and configures Gemini LLM and Embedding Model via LlamaIndex Settings."""
@@ -191,6 +164,7 @@ def generate_voice_response(text: str, lang_code: str):
     if not edge_tts:
         return None, "Edge-TTS dependency not found. Please install 'edge-tts'."
     
+    # Retrieve voice from the globally defined map
     voice = TTS_VOICE_MAP.get(lang_code, "en-US-AriaNeural")
     
     try:
@@ -204,7 +178,7 @@ def generate_voice_response(text: str, lang_code: str):
         return None, str(e)
 
 
-# --- 4. Main Application Logic ---
+# --- 5. Main Application Logic ---
 # Initialize LLM/Embedding settings
 llm, embed_model = initialize_llm_and_embedding()
 
@@ -220,7 +194,7 @@ with st.sidebar:
     
     # Multi-language selector
     selected_language = st.selectbox(
-        f"2. Select Response Language (17 Options):", # Displaying the count
+        f"2. Select Response Language ({len(LANGUAGE_DICT)} Options):", # Displaying the count
         options=list(LANGUAGE_DICT.keys()),
         index=0, 
         key="language_select"
