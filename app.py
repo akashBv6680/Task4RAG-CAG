@@ -13,27 +13,26 @@ from bs4 import BeautifulSoup
 import io
 
 # =====================================================================
-# TTS & CAG Imports
-# =====================================================================
-import asyncio
-import edge_tts
-
-# =====================================================================
 # FIX 1: SQLITE3 PATCH (for Streamlit Cloud)
 # =====================================================================
+# MUST be at the very top before any other imports that might use sqlite3
 try:
     __import__('pysqlite3')
     sys.modules['sqlite3'] = sys.modules['pysqlite3']
 except ImportError:
     pass
 
+# =====================================================================
+# TTS & CAG Imports
+# =====================================================================
+import asyncio
+import edge_tts
+
 # --- Core RAG Imports ---
 import chromadb
 from sentence_transformers import SentenceTransformer
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pypdf import PdfReader
-# Ensure lxml is available for robust HTML/XML parsing
-# from lxml import etree # Not explicitly imported but needed by bs4 for better performance
 
 # --- Google Gemini Imports ---
 from google import genai
@@ -44,6 +43,7 @@ from langsmith import traceable, tracing_context
 
 # --- Constants and Configuration ---
 COLLECTION_NAME = "rag_documents"
+EMBEDDING_MODEL = "all-MiniLM-L6-v2" # Using a fast, high-quality embedding model
 
 # *** CRITICAL FIX: Read API Key from Streamlit Secrets ***
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY")
@@ -80,13 +80,12 @@ def initialize_dependencies():
     and the Google GenAI Client.
     """
     try:
-        # 1. Initialize ChromaDB
+        # 1. Initialize ChromaDB in a temporary directory
         db_path = tempfile.mkdtemp()
         db_client = chromadb.PersistentClient(path=db_path)
         
         # 2. Initialize Sentence Transformer (for embeddings)
-        # Using a fast, high-quality embedding model
-        model = SentenceTransformer("all-MiniLM-L6-v2", device='cpu')
+        model = SentenceTransformer(EMBEDDING_MODEL, device='cpu')
         
         # 3. Initialize Google GenAI Client (for LLM)
         gemini_client = genai.Client(api_key=GEMINI_API_KEY)
@@ -128,7 +127,7 @@ async def generate_tts(text, lang_code):
     
     return audio_buffer.getvalue()
 
-# --- Gemini API Call (Unchanged logic) ---
+# --- Gemini API Call ---
 @traceable(run_type="llm")
 def call_gemini_api(prompt, max_retries=3):
     """
@@ -163,13 +162,16 @@ def call_gemini_api(prompt, max_retries=3):
 def clear_chroma_data():
     """Clears all data from the ChromaDB collection."""
     try:
+        # Check if collection exists before attempting to delete/create
         if COLLECTION_NAME in [col.name for col in st.session_state.db_client.list_collections()]:
             st.session_state.db_client.delete_collection(name=COLLECTION_NAME)
+        # Always create a new collection for the new chat
         st.session_state.db_client.get_or_create_collection(name=COLLECTION_NAME)
+        st.toast("Knowledge base cleared!", icon="🗑️")
     except Exception as e:
         st.error(f"Error clearing collection: {e}")
 
-# --- Document Processing Functions (Enhanced for new file types) ---
+# --- Document Processing Functions (Enhanced) ---
 
 def extract_text_from_pdf(uploaded_file):
     """Extracts text from an uploaded PDF file."""
@@ -181,12 +183,14 @@ def extract_text_from_pdf(uploaded_file):
 
 def extract_text_from_csv(uploaded_file):
     """Extracts text from an uploaded CSV file."""
-    df = pd.read_csv(uploaded_file)
+    # Use StringIO to read byte stream as text
+    stringio = io.StringIO(uploaded_file.getvalue().decode("utf-8"))
+    df = pd.read_csv(stringio)
     return df.to_markdown(index=False) # Convert to Markdown table for better LLM context
 
 def extract_text_from_html(uploaded_file):
     """Extracts main text content from an uploaded HTML file."""
-    content = uploaded_file.read().decode("utf-8")
+    content = uploaded_file.getvalue().decode("utf-8")
     soup = BeautifulSoup(content, 'lxml')
     # Remove script and style elements
     for script_or_style in soup(["script", "style"]):
@@ -200,11 +204,11 @@ def extract_text_from_html(uploaded_file):
 
 def extract_text_from_xml(uploaded_file):
     """Extracts all text content from an uploaded XML file."""
-    content = uploaded_file.read().decode("utf-8")
+    content = uploaded_file.getvalue().decode("utf-8")
     soup = BeautifulSoup(content, 'lxml')
     return soup.get_text(separator=' ', strip=True) # Simple text extraction
 
-def split_documents(text_data, chunk_size=1000, chunk_overlap=200): # Increased size for better context, 20% overlap
+def split_documents(text_data, chunk_size=1000, chunk_overlap=200): 
     """Splits a single string of text into chunks with overlapping."""
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
@@ -254,7 +258,8 @@ def retrieve_documents(query, n_results=5):
 # --- CAG (Context Augmentation Generation) Implementation ---
 def get_chat_history_for_cag():
     """Compiles the last few turns of chat history for context."""
-    history = st.session_state.messages[-4:] # Use last 4 messages (2 user/2 assistant turns)
+    # Use last 4 messages (2 user/2 assistant turns) for a concise, efficient context window
+    history = st.session_state.messages[-4:] 
     history_str = "\n".join([f"{msg['role'].capitalize()}: {msg['content']}" for msg in history])
     return history_str
 
@@ -267,44 +272,31 @@ def rag_pipeline(query, selected_language_code):
     if collection.count() == 0:
         return "Hey there! I'm a chatbot that answers questions based on documents you provide. Please upload a supported file or enter a GitHub raw URL in the section above before asking me anything. I'm ready when you are! 😊"
 
+    # Step 1: RAG Retrieval
     relevant_docs = retrieve_documents(query)
-    
-    if not relevant_docs:
-        # Check for CAG possibility without RAG (for general questions or history recall)
-        chat_history = get_chat_history_for_cag()
-        if len(chat_history) > 0 and 'user' not in chat_history.lower(): # Only run RAG if new context is needed
-            
-             # The system will naturally reuse information from history if the question is repeated
-             # without adding a new prompt for it. However, if the history is compiled, 
-             # we can make a direct LLM call for a history-based answer to save RAG look-up tokens.
-             # For simplicity and robustness (to ensure model handles repeated questions), we proceed with a focused prompt.
-             
-             prompt_template = (
-                f"You are an expert document assistant. Your task is to answer the 'Question' below. "
-                f"Your final response MUST be in {st.session_state.selected_language}. "
-                f"Use the 'Chat History' to understand the context. "
-                f"Since no relevant documents were found, if the answer is clearly present in the Chat History (e.g., a repeated question), you can use it. "
-                f"If the answer is NOT in the history, politely state that you cannot answer. "
-                f"\n\nChat History:\n{chat_history}\n\nQuestion: {query}\n\nAnswer:"
-            )
-             response = call_gemini_api(prompt_template)
-             return response
-
-        return "I couldn't find relevant information in the uploaded documents to answer your question."
-
     context = "\n".join(relevant_docs)
-    chat_history = get_chat_history_for_cag() # Get history for CAG
-
-    # Main RAG/CAG Prompt
-    prompt = (
-        f"You are an expert document assistant. Your task is to answer the 'Question' using ONLY the 'Context' provided below. "
-        f"For better conversational flow and to answer repeated questions, use the 'Chat History' for memory, but prioritize information from the 'Context'. "
-        f"Your final response MUST be in {st.session_state.selected_language}. "
-        f"If the Context does not contain the answer, you must politely state that the information is missing. "
-        f"\n\nChat History:\n{chat_history}"
-        f"\n\nContext: {context}\n\nQuestion: {query}\n\nAnswer:"
-    )
+    chat_history = get_chat_history_for_cag() # Step 2: CAG/History retrieval
     
+    # Combined Prompt for RAG + CAG
+    if relevant_docs:
+        prompt = (
+            f"You are an expert document assistant. Your task is to answer the 'Question' using ONLY the 'Context' provided below. "
+            f"For conversational memory, use the 'Chat History', but **prioritize** information from the 'Context'. "
+            f"Your final response MUST be in {st.session_state.selected_language}. "
+            f"If the Context does not contain the answer, you must politely state that the information is missing. "
+            f"\n\nChat History:\n{chat_history}"
+            f"\n\nContext: {context}\n\nQuestion: {query}\n\nAnswer:"
+        )
+    else:
+        # Fallback prompt using only history/general knowledge if RAG retrieval fails
+        prompt = (
+            f"You are an expert document assistant. Your task is to answer the 'Question' below. "
+            f"Your final response MUST be in {st.session_state.selected_language}. "
+            f"Use the 'Chat History' to understand the context or recall a repeated question. "
+            f"Since no relevant documents were found, if the answer is NOT clearly derivable from the Chat History or general knowledge, politely state that you cannot answer from the documents. "
+            f"\n\nChat History:\n{chat_history}\n\nQuestion: {query}\n\nAnswer:"
+        )
+
     response = call_gemini_api(prompt)
 
     if response.startswith("Error:"):
@@ -333,7 +325,6 @@ def display_chat_messages():
 
 def is_valid_github_raw_url(url):
     """Checks if the URL is a raw GitHub URL for supported files."""
-    # Updated to support .csv, .html, .xml, .txt, .md
     return re.match(r"https://raw\.githubusercontent\.com/.+\.(txt|md|csv|html|xml)$", url)
 
 def handle_user_input():
@@ -341,8 +332,8 @@ def handle_user_input():
     Handles new user input, runs the RAG pipeline, updates chat history, 
     and triggers TTS generation.
     """
+    # 1. TTS Playback Handler (runs first if a button was clicked)
     if 'tts_to_play' in st.session_state and st.session_state.tts_to_play:
-        # This branch handles the TTS playback triggered by a button press
         try:
             with st.spinner("Generating speech..."):
                 selected_language_code = LANGUAGE_DICT[st.session_state.selected_language]
@@ -354,6 +345,7 @@ def handle_user_input():
             del st.session_state['tts_to_play']
         return # Do not process chat input if playing TTS
 
+    # 2. Chat Input Handler
     if prompt := st.chat_input("Ask about your document..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
         
@@ -377,6 +369,7 @@ def handle_user_input():
                         
         st.session_state.messages.append({"role": "assistant", "content": response})
         
+        # Update chat title if it's a new chat
         if st.session_state.current_chat_id and st.session_state.chat_history[st.session_state.current_chat_id]['title'] == "New Chat":
             title = prompt[:50] + ('...' if len(prompt) > 50 else '')
             st.session_state.chat_history[st.session_state.current_chat_id]['title'] = title
@@ -391,28 +384,34 @@ def main_ui():
         initial_sidebar_state="auto"
     )
 
-    # Initialize dependencies
+    # 1. Initialize dependencies
     if 'db_client' not in st.session_state or 'model' not in st.session_state or 'gemini_client' not in st.session_state:
         st.session_state.db_client, st.session_state.model, st.session_state.gemini_client = initialize_dependencies()
         
-    if 'current_chat_id' not in st.session_state or not st.session_state.messages:
+    # 2. Handle New Chat / Initialization
+    if 'current_chat_id' not in st.session_state or st.session_state.current_chat_id is None or not st.session_state.messages:
         new_chat_id = str(uuid.uuid4())
+        
+        # Check if we are coming from a 'New Chat' click where state might be partially reset
+        # If the key exists, reuse the messages list, otherwise create a new one.
+        if new_chat_id not in st.session_state.chat_history:
+             st.session_state.messages = []
+        
         st.session_state.current_chat_id = new_chat_id
-        st.session_state.messages = []
         st.session_state.chat_history[new_chat_id] = {
             'messages': st.session_state.messages,
             'title': "New Chat",
             'date': datetime.now()
         }
-
+        
     # Top-of-app details as requested
     st.header("🤖 RAG System with Context Augmentation (CAG)")
     st.markdown("""
         **Features:**
-        * 📁 **File Support:** PDF, TXT, CSV, HTML, XML, GitHub Raw (.txt/.md)
+        * 📁 **File Support:** PDF, TXT, CSV, HTML, XML, GitHub Raw (.txt/.md/.csv/.html/.xml)
         * 🗣️ **Response Mode:** Text (Default) / **Voice Mode** (TTS via Edge-TTS)
         * 🌐 **Multi-Language Support:** 17+ Languages Available
-        * 🧠 **Cost Optimization:** Context Augmentation (CAG) for history recall.
+        * 🧠 **Cost Optimization:** Context Augmentation Generation (CAG) for history recall.
     """)
     st.markdown("---")
 
@@ -439,16 +438,21 @@ def main_ui():
             help="Switch to 'Voice' to hear the assistant's response."
         )
 
+        # --- BUG FIX: New Chat Button ---
         if st.button("New Chat", use_container_width=True):
+            # 1. Clear the RAG knowledge base for the new chat
+            clear_chroma_data() 
+            
+            # 2. Reset the current chat session state variables
             st.session_state.messages = []
-            clear_chroma_data()
-            st.session_state.chat_history = {}
             st.session_state.current_chat_id = None
-            st.experimental_rerun()
+            
+            # 3. Streamlit will rerun naturally due to state change,
+            # which will trigger the 'Handle New Chat / Initialization' block above.
+            st.toast("Starting a new chat session!", icon="✨")
 
         st.subheader("Chat History")
         if 'chat_history' in st.session_state and st.session_state.chat_history:
-             # ... (Chat history display logic remains the same for brevity)
              sorted_chat_ids = sorted(
                 st.session_state.chat_history.keys(), 
                 key=lambda x: st.session_state.chat_history[x]['date'], 
@@ -468,6 +472,7 @@ def main_ui():
                 if st.button(f"{chat_title}", key=f"btn_{chat_id}", use_container_width=True):
                     st.session_state.current_chat_id = chat_id
                     st.session_state.messages = st.session_state.chat_history[chat_id]['messages']
+                    # Using st.experimental_rerun() here is fine as we are changing the current_chat_id
                     st.experimental_rerun()
                 st.markdown(f"<small>{date_str}</small></div>", unsafe_allow_html=True)
 
@@ -490,21 +495,21 @@ def main_ui():
                     for uploaded_file in uploaded_files:
                         file_ext = uploaded_file.name.split('.')[-1].lower()
                         file_contents = None
+                        
+                        # Use .seek(0) to ensure the file is read from the beginning
+                        uploaded_file.seek(0) 
 
                         try:
+                            # Use helper functions that handle the uploaded file object
                             if file_ext == "txt":
-                                file_contents = uploaded_file.read().decode("utf-8")
+                                file_contents = uploaded_file.getvalue().decode("utf-8")
                             elif file_ext == "pdf":
                                 file_contents = extract_text_from_pdf(uploaded_file)
                             elif file_ext == "csv":
-                                # Need to reset pointer for multi-file processing
-                                uploaded_file.seek(0)
                                 file_contents = extract_text_from_csv(uploaded_file)
                             elif file_ext == "html":
-                                uploaded_file.seek(0)
                                 file_contents = extract_text_from_html(uploaded_file)
                             elif file_ext == "xml":
-                                uploaded_file.seek(0)
                                 file_contents = extract_text_from_xml(uploaded_file)
                             else:
                                 st.warning(f"Skipping unsupported file type: {uploaded_file.name}")
@@ -522,7 +527,7 @@ def main_ui():
                             continue
 
                     if total_chunks > 0:
-                        st.success(f"Successfully processed {len(uploaded_files)} file(s) into {total_chunks} chunks!")
+                        st.success(f"Successfully processed {len(uploaded_files)} file(s) into {total_chunks} chunks! Start chatting now.")
                     else:
                         st.warning("No new content was added to the knowledge base.")
 
@@ -540,16 +545,18 @@ def main_ui():
                             response.raise_for_status()
                             file_contents = response.text
                             
-                            # Simple processing for raw text/md, relies on requests/BeautifulSoup for others
-                            if file_ext in ["csv", "html", "xml"]:
+                            # For URLs, we use requests.text, then process.
+                            if file_ext == "csv":
                                 # Convert string content to file-like object for re-use of extractor functions
                                 file_obj = io.StringIO(file_contents)
-                                if file_ext == "csv":
-                                    file_contents = extract_text_from_csv(file_obj)
-                                elif file_ext == "html":
-                                    file_contents = extract_text_from_html(file_obj)
-                                elif file_ext == "xml":
-                                    file_contents = extract_text_from_xml(file_obj)
+                                # Pandas read_csv needs the file object or path
+                                file_contents = pd.read_csv(file_obj).to_markdown(index=False)
+                            elif file_ext == "html":
+                                soup = BeautifulSoup(file_contents, 'lxml')
+                                file_contents = soup.get_text(separator=' ', strip=True)
+                            elif file_ext == "xml":
+                                soup = BeautifulSoup(file_contents, 'lxml')
+                                file_contents = soup.get_text(separator=' ', strip=True)
 
                             documents = split_documents(file_contents)
                             process_and_store_documents(documents)
@@ -566,8 +573,11 @@ def main_ui():
     handle_user_input()
 
 if __name__ == "__main__":
-    # Ensure asyncio is available for Edge-TTS
-    if sys.platform == "win32" and sys.version_info >= (3, 8) and hasattr(asyncio, 'WindowsSelectorEventLoopPolicy'):
-        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    # Ensure asyncio is available for Edge-TTS on Windows
+    if sys.platform == "win32" and sys.version_info >= (3, 8):
+        try:
+            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        except AttributeError:
+            pass # Ignore if policy is not available
         
     main_ui()
