@@ -3,28 +3,30 @@
 # Streamlit framework
 streamlit
 
-# Google Gemini API SDK
+# Google Gemini API SDK (The recommended library)
 google-genai
 
 # Vector Store (ChromaDB) and its dependencies
 chromadb
-pysqlite3-binary  # CRITICAL for Streamlit Cloud deployment with ChromaDB
+chromadb-pysqlite3  # Recommended dependency for native SQLite support on Streamlit Cloud
 
 # Components from the LangChain ecosystem
 langchain-text-splitters
-langchain-core # Often needed for traceable (LangSmith) components
-langsmith # For tracing/monitoring
+langchain-core
+langsmith
 
 # Embedding model dependency
 sentence-transformers
 
 # Document Loaders/Parsers
-pypdf # For PDF processing
-requests # For fetching GitHub URLs
-# New dependencies for additional file types
-pandas # For CSV/Excel processing (though only CSV is requested)
-beautifulsoup4 # For HTML/XML parsing
-lxml # Generally a good dependency for robust XML/HTML parsing
+pypdf
+requests
+pandas
+beautifulsoup4
+lxml
 
 # New dependency for Text-to-Speech (TTS) functionality
 edge-tts
+
+# CRITICAL FIX for asynchronous operation (TTS) within Streamlit
+nest-asyncio
