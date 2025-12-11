@@ -1,33 +1,40 @@
 # Requirements for Streamlit RAG Chatbot with Gemini API and ChromaDB
 
-# Streamlit framework
+# --- Core Frameworks ---
 streamlit
 
-# Google Gemini API SDK (The recommended library)
+# Google Gemini API SDK
 google-genai
 
-# Vector Store (ChromaDB) and its dependencies
-# USE THIS LINE to install ChromaDB with all dependencies (includes pypdf, onnxruntime, etc.)
-chromadb[all]
+# --- Vector Store and Dependencies (Optimized for Streamlit Cloud) ---
+# NOTE: Using [hnsw] to enable fast indexing while avoiding dependency conflicts
+# that brought in 'uvloop' (which broke TTS).
+chromadb[hnsw]
 
-# The specific sentence-transformer model we use (also handles one of the deep dependencies)
+# CRITICAL FIX for SQLite issues on Streamlit Cloud's Linux environment
+pysqlite3-binary
+
+# --- Embedding Model ---
+# The model used by sentence-transformers for generating embeddings
 sentence-transformers
 
-# Components from the LangChain ecosystem
+# --- LangChain Ecosystem Components ---
+# For document splitting and general utilities
 langchain-text-splitters
 langchain-core
 langsmith
 
-# Document Loaders/Parsers
-# NOTE: pypdf is now included in chromadb[all], but keeping it for safety.
+# --- Document Loaders/Parsers ---
+# For various file types (PDF, Web Scraping, Data Files)
 pypdf 
 requests
 pandas
 beautifulsoup4
 lxml
 
-# Dependency for Text-to-Speech (TTS) functionality
+# --- Text-to-Speech (TTS) Fixes ---
+# Used for generating voice responses (Edge-TTS)
 edge-tts
 
-# CRITICAL FIX for asynchronous operation (TTS) within Streamlit
+# CRITICAL FIX: Allows async calls (like edge-tts) to run inside Streamlit's environment
 nest-asyncio
