@@ -34,6 +34,7 @@ lxml
 
 # --- Text-to-Speech (TTS) Fixes ---
 # Used for generating voice responses (Edge-TTS)
+gtts
 edge-tts
 
 # CRITICAL FIX: Allows async calls (like edge-tts) to run inside Streamlit's environment
