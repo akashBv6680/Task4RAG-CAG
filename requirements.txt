@@ -1,5 +1,6 @@
 streamlit==1.32.0
-PyPDF2==4.0.1
+# PyPDF2==4.0.1 is deprecated/unavailable. Using the modern 'pypdf' library instead.
+pypdf==3.17.4
 requests==2.31.0
 pydantic==2.5.0
 pydantic-core==2.14.1
