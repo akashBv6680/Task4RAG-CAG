@@ -89,6 +89,8 @@ def initialize_session_state():
     if 'documents_loaded' not in st.session_state: st.session_state.documents_loaded = False
     if 'processed_files' not in st.session_state: st.session_state.processed_files = set()
     if 'new_chat_triggered' not in st.session_state: st.session_state.new_chat_triggered = False
+    # New state to track processed URLs
+    if 'processed_urls' not in st.session_state: st.session_state.processed_urls = set()
 
 def create_new_chat(save_current=True):
     """
@@ -151,6 +153,7 @@ def clear_chroma_data():
         st.session_state.cag_cache = {} 
         st.session_state.documents_loaded = False
         st.session_state.processed_files = set() 
+        st.session_state.processed_urls = set() # Clear processed URLs
     except Exception as e:
         st.error(f"Error clearing collection: {e}")
 
@@ -305,9 +308,7 @@ def rag_pipeline(query, selected_language):
         # Cache Hit! Return the cached response and flag it as cached
         return (st.session_state.cag_cache[final_prompt], True)
 
-    # --- 4. LLM Call (The LLM call must be made *outside* the spinner 
-    # logic that decides to call it, but the caller (handle_user_input) 
-    # will handle the spinner)
+    # --- 4. LLM Call
     response = call_gemini_api(final_prompt)
     
     # Not cached, LLM call performed
@@ -428,6 +429,10 @@ def handle_url_upload(github_url):
 
             documents = split_documents(file_contents)
             process_and_store_documents(documents)
+            
+            # Record the URL as processed
+            st.session_state.processed_urls.add(github_url)
+            
             st.success(f"File from URL processed into {len(documents)} chunks! You can now chat about its contents.")
             return len(documents)
             
@@ -455,27 +460,19 @@ def handle_user_input():
             selected_language = st.session_state.selected_language
             
             # --- RAG/CAG Pipeline Call ---
-            # Step 1: Check cache/Retrieve context. 
-            # We call rag_pipeline once to get the result.
+            # Call rag_pipeline once to get the result.
             response_text, is_cached = rag_pipeline(prompt, selected_language)
             
-            # Step 2: Show Visual Feedback (Spinner or Cache Hit)
+            # Step 2: Show Visual Feedback (Cache Hit)
             if is_cached:
                 # Cache Hit! 
                 status_placeholder.info("⚡ **CACHE HIT!** Response retrieved from Context Augment Generation (CAG) cache. Token cost minimized.")
-                # Brief pause for the user to see the cache hit message
                 time.sleep(0.1) 
             elif response_text.startswith("Hello!"):
                 # No relevant documents found message
                 pass
             else:
-                # Cache Miss, LLM call was performed in rag_pipeline
-                # This block is executed *after* the LLM call is complete.
-                # To show a spinner *during* the LLM call, we would need to 
-                # modify rag_pipeline to be async or yield (which is complex).
-                # The current setup is the best compromise: show the full response 
-                # quickly after a cache miss, or with an explicit info box for a cache hit.
-                # We skip the spinner here since the LLM call is already done.
+                # Cache Miss - Clear the placeholder if it's not being used for the cache hit message
                 status_placeholder.empty()
 
             # --- TTS Generation (if requested) ---
@@ -632,16 +629,19 @@ def main_ui():
             accept_multiple_files=True
         )
 
-        # --- Automatic Processing Logic ---
+        # --- Automatic File Processing Logic ---
         if uploaded_files:
             handle_upload_and_process(uploaded_files)
 
+        # --- GitHub URL Input ---
         github_url = st.text_input("Enter a GitHub raw URL (.txt, .md, .csv, .html, .xml):", key='github_url_input')
         
-        # Process GitHub URL only when the button is pressed
-        if st.button("Process URL", key='process_url_btn') and github_url:
-            handle_url_upload(github_url)
-            
+        # --- Automatic URL Processing Logic (Replaces the button) ---
+        if github_url and github_url not in st.session_state.processed_urls:
+             # This automatically processes the file when the user finishes typing/pasting
+             # and the script reruns, as long as it hasn't been processed yet.
+             handle_url_upload(github_url)
+             
     st.markdown("---")
     
     # Chat display and input
@@ -651,15 +651,6 @@ def main_ui():
     if not st.session_state.documents_loaded and get_collection().count() == 0:
         st.info("Please upload and process at least one document or enter a GitHub URL to activate the chat input.")
     else:
-        # NOTE: If we want a spinner, we must place the time-consuming call inside 
-        # a global st.spinner() block. Since rag_pipeline returns the result 
-        # immediately, the spinner must be placed inside handle_user_input, 
-        # but that requires refactoring rag_pipeline to be called *inside* the 
-        # spinner's context, not before it. 
-        # The current implementation in handle_user_input is the most practical 
-        # way to show the CACHE HIT message reliably, even if it slightly delays 
-        # the spinner's appearance until the LLM call is complete (which is the case 
-        # in the current structure).
         handle_user_input()
 
 if __name__ == "__main__":
