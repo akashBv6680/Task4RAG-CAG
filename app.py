@@ -1,7 +1,7 @@
 # app.py
 # 📚 RAG AI Agent with Multilingual & Voice Support 🎙️
-# Supports file uploads: PDF, TXT, CSV, HTML, XML, GitHub raw files.
-# Uses Context-Augmented Generation (CAG) for history and cost minimization.
+# Status: RAG System with file support (PDF, TXT, CSV, HTML, XML, GitHub raw).
+# Features: Conversation Augmented Generation (CAG) for cost-saving, Voice Response Mode, Multilingual.
 
 import streamlit as st
 import os, sys, tempfile, uuid, time, io, asyncio, datetime, re
@@ -10,9 +10,14 @@ import pandas as pd
 from typing import Dict, Any, List
 import torch
 
-# RAG dependencies (using placeholders for heavy libraries like pypdf)
+# RAG dependencies
 import chromadb
-from sentence_transformers import SentenceTransformer
+# Note: Ensure sentence-transformers is installed for this to work
+try:
+    from sentence_transformers import SentenceTransformer
+except ImportError:
+    st.error("Please install sentence-transformers: pip install sentence-transformers")
+    SentenceTransformer = None
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # sqlite fix for Chroma
@@ -55,28 +60,55 @@ LANGUAGE_DICT = {
 }
 
 COLLECTION_NAME = "uploaded_documents_rag"
-CACHE_EXPIRY_SECONDS = 300 # 5 minutes for Conversation Caching (CAG)
+# CAG/Caching setting: Cache hit if the exact query is repeated within 5 minutes
+CACHE_EXPIRY_SECONDS = 300 
 
 # -------------------------
-# RAG and Storage Helpers
+# Cached init (Minimal - only for Gemini client and RAG components)
 # -------------------------
 @st.cache_resource(show_spinner=False)
 def initialize_rag_dependencies():
-    # Use disk storage for persistence across re-runs (needed for file uploads)
-    db_path = tempfile.mkdtemp()
+    if not SentenceTransformer:
+        return None, None, None
+
+    # Use disk storage for persistence across re-runs
+    db_path = os.path.join(tempfile.gettempdir(), "chroma_db_rag")
+    if not os.path.exists(db_path):
+        os.makedirs(db_path)
     db_client = chromadb.PersistentClient(path=db_path)
-    # Use a small, fast model for embedding
+    
+    # Use a small, fast embedding model
     model = SentenceTransformer("all-MiniLM-L6-v2", device='cpu') 
+    
     if GEMINI_API_KEY and genai:
         gemini_client = genai.Client(api_key=GEMINI_API_KEY)
     else:
         gemini_client = None
+        
     return db_client, model, gemini_client
 
+@st.cache_resource(show_spinner=False)
+def initialize_gemini_client():
+    if GEMINI_API_KEY and genai:
+        gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+    else:
+        gemini_client = None
+    return gemini_client
+
+# -------------------------
+# RAG and Storage Helpers
+# -------------------------
 def get_collection():
     if 'db_client' not in st.session_state:
         st.session_state.db_client, st.session_state.model, st.session_state.gemini_client = initialize_rag_dependencies()
-    return st.session_state.db_client.get_or_create_collection(name=COLLECTION_NAME)
+        if not st.session_state.db_client:
+            return None
+    try:
+        # Tries to get the collection, creates it if it doesn't exist
+        return st.session_state.db_client.get_or_create_collection(name=COLLECTION_NAME)
+    except Exception as e:
+        st.error(f"Error accessing ChromaDB: {e}")
+        return None
 
 def split_documents(text_data, chunk_size=500, chunk_overlap=100):
     # Enforcing overlapping chunking as requested
@@ -90,6 +122,8 @@ def split_documents(text_data, chunk_size=500, chunk_overlap=100):
 
 def process_and_store_documents(documents: List[str]):
     collection = get_collection()
+    if not collection: return 0
+
     model = st.session_state.model
     
     # Generate embeddings in batches for efficiency
@@ -102,8 +136,12 @@ def process_and_store_documents(documents: List[str]):
 
 def retrieve_documents(query, n_results=5):
     collection = get_collection()
+    if not collection or collection.count() == 0: return []
+
     model = st.session_state.model
     q_emb = model.encode(query).tolist()
+    
+    # Query the collection
     results = collection.query(query_embeddings=q_emb, n_results=n_results, include=['documents', 'distances'])
     return results['documents'][0] if results['documents'] else []
 
@@ -113,37 +151,66 @@ def extract_text_from_upload(uploaded_file):
     raw_text = ""
     
     # Simple reader for text-like files
-    if file_details["FileType"] in ["text/plain", "application/csv", "text/csv", "application/json", 
-                                    "text/html", "application/xml", "text/xml"]:
-        raw_text = uploaded_file.getvalue().decode("utf-8")
+    text_types = ["text/plain", "application/csv", "text/csv", "application/json", 
+                  "text/html", "application/xml", "text/xml"]
     
-    # Placeholder for PDF. Requires libraries like 'pypdf' or 'pdfminer.six'
+    if any(ft in file_details["FileType"] for ft in text_types) or uploaded_file.name.endswith(('.txt', '.csv', '.html', '.xml', '.json', '.raw')):
+        try:
+            raw_text = uploaded_file.getvalue().decode("utf-8")
+        except UnicodeDecodeError:
+            raw_text = uploaded_file.getvalue().decode("latin-1") # Fallback for odd encodings
+    
+    # Placeholder for PDF. Requires libraries like 'pypdf'
     elif file_details["FileType"] == "application/pdf":
         try:
             # THIS IS A PLACEHOLDER. User must install pypdf
             from pypdf import PdfReader
-            reader = PdfReader(uploaded_file)
+            reader = PdfReader(io.BytesIO(uploaded_file.getvalue()))
             for page in reader.pages:
                 raw_text += page.extract_text() or ""
         except ImportError:
-            return f"Error: Cannot read PDF. Please install 'pypdf'. Content placeholder: {uploaded_file.name}", False
+            return f"Error: Cannot read PDF. Please install 'pypdf' (pip install pypdf). Content placeholder: {uploaded_file.name}", False
+        except Exception as e:
+             return f"Error reading PDF: {e}", False
     
-    # Basic attempt for other binary types (like images, etc. should be handled by specific tools)
+    # Basic attempt for other binary types
     else:
-        return f"File type {file_details['FileType']} not supported or requires external tools.", False
+        return f"File type {file_details['FileType']} not explicitly supported or requires external tools.", False
 
     return raw_text, True
 
 def clear_rag_storage():
     db_client = st.session_state.db_client if 'db_client' in st.session_state else initialize_rag_dependencies()[0]
-    try:
-        db_client.delete_collection(name=COLLECTION_NAME)
-    except Exception:
-        pass
-    get_collection() # Re-create the collection
-    st.session_state.ingested_files = []
-    st.session_state.cache = {}
-    st.rerun()
+    if db_client:
+        try:
+            db_client.delete_collection(name=COLLECTION_NAME)
+        except Exception:
+            pass
+        get_collection() # Re-create the collection
+        st.session_state.ingested_files = []
+        st.session_state.cache = {}
+        st.rerun()
+
+# -------------------------
+# Utility functions (Generic model call)
+# -------------------------
+def call_gemini_api(prompt, model_name="gemini-2.5-flash", system_instruction="You are a helpful assistant.", max_retries=5):
+    gemini_client = initialize_gemini_client()
+    if not gemini_client:
+        return {"error": "Gemini client not configured."}
+    
+    retry_delay = 1
+    for i in range(max_retries):
+        try:
+            cfg = types.GenerateContentConfig(system_instruction=system_instruction)
+            resp = gemini_client.models.generate_content(model=model_name, contents=prompt, config=cfg)
+            return {"response": resp.text}
+        except APIError as e:
+            if i < max_retries - 1:
+                time.sleep(retry_delay); retry_delay *= 2; continue
+            return {"error": str(e)}
+        except Exception as e:
+            return {"error": str(e)}
 
 # -------------------------
 # TTS utilities (retained)
@@ -212,7 +279,6 @@ def synthesize(text: str, engine: str, lang_code="en"):
         voice = edge_voice_map.get(lang_code, "en-US-AriaNeural")
         audio, err = tts_edge(text, voice=voice, rate="+0%")
         if audio: return (audio, "audio/mp3", None)
-        # Fallback to gTTS if edge_tts fails or is not available
         audio2, err2 = tts_gtts(text, lang=lang_code if lang_code else "en")
         return (audio2, "audio/mp3", err or err2)
     if engine == "gTTS":
@@ -221,45 +287,45 @@ def synthesize(text: str, engine: str, lang_code="en"):
     return (None, None, "Unknown engine")
 
 # -------------------------
-# RAG Pipeline with CAG (Caching)
+# RAG Pipeline with CAG (Caching) - THE KEY IMPLEMENTATION
 # -------------------------
 def rag_pipeline(query, selected_language):
-    # 1. CAG Check (Conversation Augmented Generation / Caching)
+    # 1. CAG Check (Conversation Augmented Generation / Response Caching)
     cache = st.session_state.get('cache', {})
     if query in cache and (time.time() - cache[query]['timestamp'] < CACHE_EXPIRY_SECONDS):
         st.info("🔄 Serving response from cache (CAG/Cost Reduction).")
         return cache[query]['response']
     
-    # 2. RAG Retrieval
+    # 2. RAG Retrieval (Skipped if cache hit)
     relevant_docs = retrieve_documents(query)
     kb_context = "\n".join(relevant_docs)
     
     # 3. Dynamic System Instruction
-    file_count = get_collection().count()
+    file_count = get_collection().count() if get_collection() else 0
     if file_count == 0 and not relevant_docs:
         system_instruction = (
             f"You are a helpful assistant. No documents have been uploaded. Answer the query generally. "
-            f"Your response must be in {selected_language}."
+            f"Your response must be concise and in {selected_language}."
         )
         prompt = query
     else:
         system_instruction = (
             f"You are an expert RAG system. Use the provided context from the uploaded documents to answer the user's question. "
             f"If the context is insufficient, state that you cannot fully answer based on the provided documents. "
-            f"Your response must be accurate and formatted in {selected_language}. "
-            f"Cite the documents where possible."
+            f"Your response must be accurate, concise, and formatted in {selected_language}. "
+            f"Do NOT invent information outside of the context."
         )
         prompt = f"### CONTEXT FROM DOCUMENTS\n{kb_context}\n\n### USER QUESTION: {query}"
         
-    # 4. API Call
-    response_json = call_gemini_api(prompt, system_instruction=system_instruction)
+    # 4. API Call (Skipped if cache hit)
+    response_json = call_gemini_api(prompt, model_name="gemini-2.5-flash", system_instruction=system_instruction)
 
     if 'error' in response_json:
         answer = f"Generation error: {response_json['error']}"
     else:
         answer = response_json.get('response', "No response text.")
 
-    # 5. CAG Update
+    # 5. CAG Update (Store new answer for future cache hits)
     cache[query] = {'response': answer, 'timestamp': time.time()}
     st.session_state.cache = cache
     
@@ -269,11 +335,12 @@ def rag_pipeline(query, selected_language):
 # Sidebar and state
 # -------------------------
 st.sidebar.title("RAG Settings ⚙️")
-menu = st.sidebar.radio("Select Module", ["Document Loader", "RAG Chatbot"])
+menu = st.sidebar.radio("Select Module", ["Document Loader", "RAG Chatbot", "TTS Demo (Standalone)"])
 
 # File Uploader and RAG Status
 st.sidebar.markdown("---")
 st.sidebar.subheader("Document Uploads")
+# Initialize RAG components if not present
 if 'db_client' not in st.session_state:
     st.session_state.db_client, st.session_state.model, st.session_state.gemini_client = initialize_rag_dependencies()
 if 'ingested_files' not in st.session_state:
@@ -281,9 +348,11 @@ if 'ingested_files' not in st.session_state:
 if 'cache' not in st.session_state:
     st.session_state.cache = {}
 
-kb_count = get_collection().count()
+kb_count = get_collection().count() if get_collection() else 0
 st.sidebar.info(f"Loaded Chunks: {kb_count}")
-if st.sidebar.button("Clear RAG Storage"):
+st.sidebar.caption(f"CAG Cache Size: {len(st.session_state.cache)} entries")
+
+if st.sidebar.button("Clear RAG Storage & Cache"):
     clear_rag_storage()
 
 st.sidebar.markdown("---")
@@ -303,14 +372,11 @@ lang_code = LANGUAGE_DICT.get(lang_display, "en")
 
 if menu == "Document Loader":
     st.title("Document Loader 📄➡️🧠")
-    st.markdown("""
-        Upload documents (PDF, TXT, CSV, HTML, XML, etc.) to build the RAG knowledge base.
-        Files are processed using **overlapping chunking** for better context retrieval.
-        **Note:** For PDF parsing, you may need to install external libraries like `pypdf`.
-    """)
+    st.markdown("## RAG System Status: Files Ingestion and Chunking")
+    st.caption("Upload documents (PDF, TXT, CSV, HTML, XML, etc.) to build the RAG knowledge base. Files are processed using **overlapping chunking** for better context retrieval. **Note:** For PDF/CSV support, check `requirements.txt`.")
     
     uploaded_files = st.file_uploader(
-        "Upload Files (PDF, TXT, CSV, HTML, XML, etc.)",
+        "Upload Files (PDF, TXT, CSV, HTML, XML, JSON, etc.)",
         type=["pdf", "txt", "csv", "html", "xml", "json"],
         accept_multiple_files=True
     )
@@ -390,3 +456,19 @@ elif menu == "RAG Chatbot":
                             st.warning(f"TTS failed: {err}")
                             
                 st.session_state.messages_rag.append({"role": "assistant", "content": answer})
+                
+elif menu == "TTS Demo (Standalone)":
+    st.title("Text-to-Speech Demo 🔊")
+    st.info("Uses the selected TTS engine and language from the sidebar.")
+    tts_text = st.text_area("Text to convert to speech", "This is a demonstration of the text-to-speech capabilities using the selected engine and language settings from the sidebar. You requested Edge-TTS and multilingual support.", height=150)
+    if st.button("Generate Speech"):
+        if tts_text.strip():
+            with st.spinner(f"Generating audio with {tts_engine} in {st.session_state.selected_language}..."):
+                audio, mime, err = synthesize(tts_text, tts_engine, lang_code)
+                if audio:
+                    st.audio(io.BytesIO(audio), format=mime)
+                    st.success("Playback complete.")
+                else:
+                    st.error(f"TTS Generation Failed: {err}")
+        else:
+            st.warning("Please enter some text for TTS.")
