@@ -3,20 +3,21 @@ import os, sys, tempfile, uuid, time, re, io, asyncio, datetime
 from typing import Dict, Any
 from cachetools import LRUCache 
 
-# LlamaIndex Dependencies (Original Project)
+# LlamaIndex Dependencies
 from google.genai.errors import APIError 
 from llama_index.core import VectorStoreIndex, SimpleDirectoryReader, Settings
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.llms.gemini import Gemini
 from llama_index.embeddings.gemini import GeminiEmbedding
 
-# TTS dependencies
+# TTS dependencies (ensure 'pip install edge-tts' is run)
 try:
     import edge_tts
-except Exception:
+except ImportError:
     edge_tts = None
 
-# --- 1. Configuration and Caching (Simulating CAG for cost reduction) ---
+
+# --- 1. Configuration and Caching ---
 MODEL_NAME = "gemini-2.5-flash"
 EMBED_MODEL = "models/text-embedding-004" 
 CHUNK_SIZE = 1024       
@@ -26,19 +27,31 @@ CACHE_TTL = 3600
 
 # Multi-language support dictionary
 LANGUAGE_DICT = {
-    "English": "en", "Spanish": "es", "Arabic": "ar", "French": "fr", "German": "de", "Hindi": "hi",
-    "Tamil": "ta", "Bengali": "bn", "Japanese": "ja", "Korean": "ko", "Russian": "ru",
-    "Chinese (Simplified)": "zh-Hans", "Portuguese": "pt", "Italian": "it", "Dutch": "nl", "Turkish": "tr"
+    "English": "en", "Hindi (हिन्दी)": "hi", "Tamil (தமிழ்)": "ta", "Spanish": "es", 
+    "French": "fr", "German": "de", "Arabic": "ar", "Bengali (বাংলা)": "bn", 
+    "Japanese (日本語)": "ja", "Korean (한국어)": "ko", "Russian (русский)": "ru",
+    "Chinese (Simplified)": "zh-Hans", "Portuguese": "pt", "Italian": "it", 
+    "Dutch": "nl", "Turkish": "tr"
 }
 
-# Corrected Edge-TTS Voice Map
+# Edge-TTS Voice Map
 TTS_VOICE_MAP = {
-    "en": "en-US-AriaNeural", "es": "es-ES-ElviraNeural", "fr": "fr-FR-HenriNeural", 
-    "hi": "hi-IN-SwaraNeural", "ta": "ta-IN-ValluvarNeural", "ja": "ja-JP-NanamiNeural", 
-    "ko": "ko-KR-JiMinNeural", "zh-Hans": "zh-CN-XiaoxiaoNeural", "pt": "pt-PT-FernandaNeural", 
-    "ar": "ar-SA-HamedNeural", "de": "de-DE-KatjaNeural", "bn": "bn-IN-BashkarNeural", 
-    "it": "it-IT-ElsaNeural", "nl": "nl-NL-ColetteNeural", "tr": "tr-TR-AhmetNeural", 
-    "ru": "ru-RU-DariyaNeural"
+    "en": "en-US-AriaNeural",      # English
+    "es": "es-ES-ElviraNeural",      # Spanish
+    "fr": "fr-FR-HenriNeural",      # French
+    "hi": "hi-IN-SwaraNeural",      # Hindi
+    "ta": "ta-IN-ValluvarNeural",    # Tamil
+    "ja": "ja-JP-NanamiNeural",      # Japanese
+    "ko": "ko-KR-JiMinNeural",      # Korean
+    "zh-Hans": "zh-CN-XiaoxiaoNeural", # Simplified Chinese
+    "pt": "pt-PT-FernandaNeural",    # Portuguese
+    "ar": "ar-SA-HamedNeural",      # Arabic
+    "de": "de-DE-KatjaNeural",      # German
+    "bn": "bn-IN-BashkarNeural",    # Bengali
+    "it": "it-IT-ElsaNeural",      # Italian
+    "nl": "nl-NL-ColetteNeural",    # Dutch
+    "tr": "tr-TR-AhmetNeural",      # Turkish
+    "ru": "ru-RU-DariyaNeural"      # Russian
 }
 
 # Initialize a simple LRU cache for final responses (CAG cost reduction)
@@ -47,20 +60,17 @@ if 'response_cache' not in st.session_state:
 
 # --- 2. Streamlit UI Components (Top Banner) ---
 st.set_page_config(
-    page_title="RAG AI Agent with Gemini 2.5 Flash",
+    page_title="Multilingual RAG AI Agent with Gemini 2.5 Flash",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-st.title("📄💬 Multi-Format RAG AI Agent with Gemini 2.5 Flash")
+st.title("📄💬 Multi-Lingual RAG AI Agent with Gemini 2.5 Flash")
 st.markdown("""
 ### ✨ System Status & Features
-- **RAG System:** Supports documents like **PDF, TXT, CSV, HTML, XML, GitHub `.raw` file**, and other formats via `unstructured` and LlamaIndex loaders.
-- **Language Support:** **Multi-lingual** RAG response in 17+ languages.
-- **Response Mode:** Capacity to respond in **Voice Mode (Text-to-Speech)** using Edge-TTS.
-- **Cost Optimization (CAG):** Utilizes **Cache-Augmented Generation** for repeated queries to minimize token cost.
-- **Chunking:** Uses **Overlapping Chunking** (Size: $1024$, Overlap: $256$) for improved context retrieval.
-- **Model:** `gemini-2.5-flash`
+- **RAG System:** Supports diverse document formats.
+- **Language Support:** **Multi-lingual** RAG response in 17+ languages, controlled by user selection.
+- **Voice Mode:** Supports **Text-to-Speech (TTS)** using Edge-TTS in the selected language.
 """)
 st.divider()
 
@@ -70,11 +80,13 @@ def initialize_llm_and_embedding():
     """Initializes and configures Gemini LLM and Embedding Model via LlamaIndex Settings."""
     if "GEMINI_API_KEY" not in os.environ:
         try:
+            # Check Streamlit secrets
             os.environ["GEMINI_API_KEY"] = st.secrets["gemini_api_key"]
         except Exception:
             st.error("🚨 Gemini API Key not found in environment variables or Streamlit secrets. Please set it.")
             st.stop()
             
+    # Configure LlamaIndex global settings
     Settings.llm = Gemini(model=MODEL_NAME, api_key=os.environ["GEMINI_API_KEY"])
     Settings.embed_model = GeminiEmbedding(model_name=EMBED_MODEL, api_key=os.environ["GEMINI_API_KEY"])
     Settings.node_parser = SentenceSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
@@ -109,8 +121,8 @@ def get_index(uploaded_files):
         index = VectorStoreIndex.from_documents(documents)
         return index
 
-# Edge-TTS Functions (Incorporating async helper and correct voice selection)
-async def _edge_async(text: str, voice="en-US-AriaNeural", rate="+0%"):
+# Edge-TTS Functions
+async def _edge_async(text: str, voice: str, rate="+0%"):
     """Asynchronous Edge TTS worker."""
     if not edge_tts:
         return None
@@ -119,14 +131,11 @@ async def _edge_async(text: str, voice="en-US-AriaNeural", rate="+0%"):
     comm = edge_tts.Communicate(**kwargs)
     out = io.BytesIO()
     
-    # Read the audio chunks from the stream
     async for chunk in comm.stream():
         if chunk["type"] == "audio":
             out.write(chunk["data"])
     
-    # If output is empty, it means the TTS service failed to generate audio
     if out.tell() == 0:
-        # Returning None to indicate failure
         return None
         
     out.seek(0)
@@ -134,25 +143,22 @@ async def _edge_async(text: str, voice="en-US-AriaNeural", rate="+0%"):
 
 def generate_voice_response(text: str, lang_code: str):
     """
-    Generates audio using Edge-TTS.
+    Generates audio using Edge-TTS in the specified language voice.
     Returns (audio_bytes, error_message)
     """
     if not edge_tts:
         return None, "Edge-TTS dependency not found. Please install 'edge-tts'."
     
-    # Select the voice corresponding to the response language
     voice = TTS_VOICE_MAP.get(lang_code, "en-US-AriaNeural")
     
     try:
         audio_data = asyncio.run(_edge_async(text, voice))
         
         if audio_data is None:
-            # Explicit error for zero audio data received
-            return None, "No audio was received. Please verify that your parameters are correct."
+            return None, f"No audio was received. Please verify that the voice '{voice}' supports the generated language text."
             
         return audio_data, None
     except Exception as e:
-        # Catch any other runtime issues (e.g., event loop errors, network issues)
         return None, str(e)
 
 
@@ -162,50 +168,62 @@ llm, embed_model = initialize_llm_and_embedding()
 
 # Sidebar for controls
 with st.sidebar:
-    st.header("⚙️ Settings")
+    st.header("⚙️ RAG Settings")
     
     uploaded_files = st.file_uploader(
-        "Upload Documents for RAG (PDF, TXT, CSV, HTML, XML, etc.)",
+        "1. Upload Documents (PDF, TXT, CSV, etc.)",
         accept_multiple_files=True,
         key="file_uploader" 
     )
     
+    # Multi-language selector
+    selected_language = st.selectbox(
+        "2. Select Response Language:",
+        options=list(LANGUAGE_DICT.keys()),
+        index=0, 
+        key="language_select"
+    )
+    # Get the language code (e.g., 'hi' for Hindi)
+    lang_code = LANGUAGE_DICT[selected_language]
+    
     # Response Mode
     response_mode = st.radio(
-        "Select Response Mode:",
+        "3. Select Response Mode:",
         ("Text Only", "Text and Voice"),
         index=0,
         key="response_mode_radio"
     )
 
-    # Multi-language selector
-    selected_language = st.selectbox(
-        "Select Response Language:",
-        options=list(LANGUAGE_DICT.keys()),
-        index=0, 
-        key="language_select"
-    )
-    lang_code = LANGUAGE_DICT[selected_language]
+    st.subheader("Index Status")
     
-    st.subheader("RAG Index Status")
-    
+    index = None
     if uploaded_files:
         st.success(f"Files uploaded: {len(uploaded_files)}")
+        # Build/get the index (cached)
         index = get_index(uploaded_files)
         st.session_state.index_built = True
         st.success("✅ RAG Index is Ready/Cached!")
     else:
         st.warning("Please upload documents to build the RAG Index.")
         st.session_state.index_built = False
-        index = None
+
 
 # Main Chat Interface
 if st.session_state.get("index_built", False) and index:
+    
+    # --- Dynamic System Prompt ---
+    # THIS LINE ENSURES THE LLM RESPONDS IN THE SELECTED LANGUAGE
+    system_prompt_template = (
+        f"You are a helpful RAG AI assistant. Answer the user's question based ONLY on the context provided. "
+        f"The final response MUST be in the selected language: {selected_language}. "
+        f"Be concise and respond within a minute."
+    )
+    
     query_engine = index.as_query_engine(
         response_mode="compact", 
         llm=llm,
         streaming=True, 
-        system_prompt=f"You are a helpful RAG AI assistant. Answer the user's question based ONLY on the context provided. The final response MUST be in the selected language: {selected_language}. Be concise and respond within a minute."
+        system_prompt=system_prompt_template
     )
 
     if "messages" not in st.session_state:
@@ -257,21 +275,21 @@ if st.session_state.get("index_built", False) and index:
                         final_response_text = f"An unexpected error occurred: {e}"
                         st.error(final_response_text)
 
-            # TTS Generation
-            if response_mode == "Text and Voice" and final_response_text and not final_response_text.startswith("An API Error"):
+            # TTS Generation (only if edge_tts is installed and mode is selected)
+            if response_mode == "Text and Voice" and edge_tts and final_response_text and not final_response_text.startswith("An API Error"):
                 audio_buffer, err = generate_voice_response(final_response_text, lang_code)
                 if audio_buffer:
                     st.audio(io.BytesIO(audio_buffer), format="audio/mp3", autoplay=True)
                     st.info(f"🔊 Speaking response in {selected_language}...")
                 else:
-                    st.warning(f"TTS failed: {err}")
+                    st.warning(f"TTS failed: {err}. If the issue persists, the TTS service may be temporarily unavailable or the specific voice may not support the generated text.")
 
             # Store final message in history
             st.session_state.messages.append({"role": "assistant", "content": final_response_text})
 else:
-    st.info("Please upload and process your documents in the sidebar to begin chatting.")
+    st.info("Please upload your documents in the sidebar (step 1) and confirm the index is ready before chatting.")
 
 # Next Step Suggestion
 st.sidebar.markdown("---")
 st.sidebar.markdown("### Next Step")
-st.sidebar.info("The application is running! Please upload your documents and try asking a question in any supported language.")
+st.sidebar.info("The application is now fully configured for multilingual RAG responses! Try uploading a file and select any language like **Tamil (தமிழ்)** or **Hindi (हिन्दी)**.")
