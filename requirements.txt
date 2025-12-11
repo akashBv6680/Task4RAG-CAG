@@ -1,29 +1,19 @@
-# Requirements for Streamlit RAG Chatbot with Gemini API and ChromaDB
-
-# Streamlit framework
-streamlit
-
-# Google Gemini API SDK
-google-genai
-
-# Vector Store (ChromaDB) and its dependencies
-chromadb
-pysqlite3-binary  # CRITICAL for Streamlit Cloud deployment with ChromaDB
-
-# Components from the LangChain ecosystem
-langchain-text-splitters
-langchain-core # Often needed for traceable (LangSmith) components
-langsmith # For tracing/monitoring
-
-# Embedding model dependency
-sentence-transformers
-
-# Document Loaders/Parsers
-pypdf            # For PDF processing
-requests         # For fetching GitHub URLs
-pandas           # For CSV processing
-lxml             # For XML/HTML parsing
-beautifulsoup4   # For HTML/XML parsing
-
-# Text-to-Speech
-edge-tts         # For TTS functionality
+streamlit==1.32.0
+PyPDF2==4.0.1
+requests==2.31.0
+pydantic==2.5.0
+pydantic-core==2.14.1
+pysqlite3-binary==1.1.1
+chromadb==0.4.24
+sentence-transformers==2.2.2
+langchain-text-splitters==0.0.1
+transformers==4.35.2
+torch==2.1.1
+scikit-learn==1.3.2
+plotly==5.18.0
+pandas==2.1.3
+numpy==1.24.3
+pillow==10.1.0
+google-generativeai==0.3.5
+edge-tts==6.1.13
+gtts==2.4.0
