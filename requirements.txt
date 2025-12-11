@@ -7,25 +7,26 @@ streamlit
 google-genai
 
 # Vector Store (ChromaDB) and its dependencies
-chromadb
-chromadb-pysqlite3  # Recommended dependency for native SQLite support on Streamlit Cloud
+# USE THIS LINE to install ChromaDB with all dependencies (includes pypdf, onnxruntime, etc.)
+chromadb[all]
+
+# The specific sentence-transformer model we use (also handles one of the deep dependencies)
+sentence-transformers
 
 # Components from the LangChain ecosystem
 langchain-text-splitters
 langchain-core
 langsmith
 
-# Embedding model dependency
-sentence-transformers
-
 # Document Loaders/Parsers
-pypdf
+# NOTE: pypdf is now included in chromadb[all], but keeping it for safety.
+pypdf 
 requests
 pandas
 beautifulsoup4
 lxml
 
-# New dependency for Text-to-Speech (TTS) functionality
+# Dependency for Text-to-Speech (TTS) functionality
 edge-tts
 
 # CRITICAL FIX for asynchronous operation (TTS) within Streamlit
