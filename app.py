@@ -30,7 +30,6 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 try:
     from pypdf import PdfReader
 except ImportError:
-    # If pypdf is missing, we still let the app run but warn the user
     pass
 
 # --- Google Gemini Imports ---
@@ -51,7 +50,6 @@ except ImportError:
 try:
     from edge_tts import Communicate
 except ImportError:
-    # If edge-tts is missing, we still let the app run but warn the user
     pass
 
 
@@ -89,34 +87,43 @@ def initialize_session_state():
     if 'current_chat_id' not in st.session_state: st.session_state.current_chat_id = None
     if 'cag_cache' not in st.session_state: st.session_state.cag_cache = {}
     if 'documents_loaded' not in st.session_state: st.session_state.documents_loaded = False
-    # Set of file names that have been processed to prevent re-processing on rerun
     if 'processed_files' not in st.session_state: st.session_state.processed_files = set()
+    # Flag used to prevent creating new chats on accidental sidebar click/rerun
+    if 'new_chat_triggered' not in st.session_state: st.session_state.new_chat_triggered = False
 
-def create_new_chat():
-    """Resets session state for a new conversation, but keeps RAG data."""
+def create_new_chat(save_current=True):
+    """
+    Resets session state for a new conversation, but keeps RAG data.
     
-    # Save the current chat before starting a new one
-    if st.session_state.current_chat_id and st.session_state.messages:
-        # If the current chat is not empty, ensure it's saved
-        st.session_state.chat_history[st.session_state.current_chat_id]['messages'] = st.session_state.messages
+    Args:
+        save_current (bool): Whether to save the current conversation 
+                             before starting a new one.
+    """
+    # 1. Save the current chat before starting a new one
+    if save_current and st.session_state.current_chat_id and st.session_state.messages:
+        # Check if the current chat ID exists in history
+        if st.session_state.current_chat_id in st.session_state.chat_history:
+             st.session_state.chat_history[st.session_state.current_chat_id]['messages'] = st.session_state.messages
     
+    # 2. Create new chat data
     new_chat_id = str(uuid.uuid4())
+    
+    # 3. Update session state
     st.session_state.current_chat_id = new_chat_id
     st.session_state.messages = []
     st.session_state.chat_history[new_chat_id] = {
-        'messages': st.session_state.messages,
+        'messages': [],
         'title': "New Chat",
         'date': datetime.now()
     }
-    # Clear the CAG cache for the new chat to reduce chance of incorrect reuse
     st.session_state.cag_cache = {}
+    st.session_state.new_chat_triggered = True
 
 @st.cache_resource
 def initialize_dependencies():
     """Initializes and returns the ChromaDB client, SentenceTransformer model, and the Google GenAI Client."""
     try:
         # 1. Initialize ChromaDB (Use a unique temp directory for each Streamlit run)
-        # Using a temporary directory is necessary for in-memory/disk persistence on Streamlit Cloud
         db_path = tempfile.mkdtemp()
         db_client = chromadb.PersistentClient(path=db_path)
         
@@ -162,7 +169,6 @@ def extract_text_from_pdf(uploaded_file):
             text += page.extract_text() or ""
         return text
     except NameError:
-        # Handles case where pypdf might not be installed
         st.warning("PDF processing skipped. 'pypdf' library is required.")
         return ""
 
@@ -309,7 +315,6 @@ def rag_pipeline(query, selected_language):
 
 def generate_tts_audio(text, language_code):
     """Generates a TTS audio file using Edge-TTS."""
-    # Map a few languages, default to English US
     voice = VOICE_NAME
     if language_code == "hi": voice = "hi-IN-MadhurNeural"
     elif language_code == "es": voice = "es-ES-ElviraNeural"
@@ -324,12 +329,10 @@ def generate_tts_audio(text, language_code):
                 if chunk["type"] == "audio":
                     audio_buffer.write(chunk["data"])
 
-        # Run the async function
         asyncio.run(generate())
         audio_buffer.seek(0)
         return audio_buffer
     except Exception as e:
-        # Soft failure: log error but continue without voice
         return None
 
 # =====================================================================
@@ -345,7 +348,6 @@ def handle_upload_and_process(uploaded_files):
     new_files_to_process = [f for f in uploaded_files if f.name not in processed_files]
     
     if not new_files_to_process:
-        # If the user uploads the same files again, we don't re-process them
         return 
 
     with st.spinner("Processing files and creating vector embeddings..."):
@@ -371,7 +373,6 @@ def handle_file_upload(uploaded_file):
     file_ext = uploaded_file.name.split('.')[-1].lower()
     file_contents = None
     
-    # Crucial: Reset file pointer for reading
     uploaded_file.seek(0) 
 
     try:
@@ -414,7 +415,6 @@ def handle_url_upload(github_url):
             response.raise_for_status()
             file_contents = response.text
             
-            # Reprocess logic for non-text formats fetched via URL
             if file_ext in ["html", "xml"]:
                 soup = BeautifulSoup(file_contents, 'lxml')
                 if file_ext == 'html':
@@ -449,28 +449,26 @@ def handle_user_input():
             st.markdown(prompt)
             
         with st.chat_message("assistant"):
-            # Use a placeholder for the spinner and cache message
             status_placeholder = st.empty()
             
             # --- RAG/CAG Pipeline ---
             response_text, is_cached = rag_pipeline(prompt, st.session_state.selected_language)
             
             if is_cached:
-                # 1. Show the cache hit message (CAG feature feedback)
+                # 1. Show the cache hit message
                 status_placeholder.info("⚡ **CACHE HIT!** Response retrieved from Context Augment Generation (CAG) cache. Token cost minimized.")
-                # The response is instant, no need for spinner.
+                # Wait briefly for the info box to appear before displaying the response
+                time.sleep(0.1) 
             else:
                 # 1. Show spinner for LLM call
                 with status_placeholder.spinner("Thinking..."):
-                    # This block runs for the initial LLM call
-                    pass 
-                status_placeholder.empty() # Clear the spinner/status message
+                    time.sleep(0.1) 
+                status_placeholder.empty()
 
             # --- TTS Generation (if requested) ---
             audio_buffer = None
             if st.session_state.response_mode == 'Voice' and not response_text.startswith("Error:"):
                 language_code = LANGUAGE_DICT.get(st.session_state.selected_language, 'en')
-                # If cached, TTS is instant, if not cached, it runs quickly after LLM call
                 audio_buffer = generate_tts_audio(response_text, language_code)
                 
             # 2. Show the final text response
@@ -488,19 +486,20 @@ def handle_user_input():
         st.session_state.messages.append(message_to_store)
         
         # Update chat history title
-        if st.session_state.current_chat_id and st.session_state.chat_history[st.session_state.current_chat_id]['title'] == "New Chat":
+        current_chat_data = st.session_state.chat_history.get(st.session_state.current_chat_id)
+        if current_chat_data and current_chat_data['title'] == "New Chat":
             title = prompt[:50] + ('...' if len(prompt) > 50 else '')
             st.session_state.chat_history[st.session_state.current_chat_id]['title'] = title
         
         # Ensure the entire chat messages list is saved back to history
-        st.session_state.chat_history[st.session_state.current_chat_id]['messages'] = st.session_state.messages
+        if st.session_state.current_chat_id:
+            st.session_state.chat_history[st.session_state.current_chat_id]['messages'] = st.session_state.messages
 
 def display_chat_messages():
     """Displays all chat messages in the Streamlit app."""
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
-            # Display audio player if it's an assistant message and an audio file exists
             if message["role"] == "assistant" and "audio" in message and message["audio"] is not None:
                 st.audio(message["audio"], format="audio/mp3")
 
@@ -518,14 +517,18 @@ def main_ui():
     )
 
     initialize_session_state()
-
-    # Initialize dependencies: db_client, model, and gemini_client
+    
+    # Initialize dependencies
     if 'db_client' not in st.session_state or 'model' not in st.session_state or 'gemini_client' not in st.session_state:
         st.session_state.db_client, st.session_state.model, st.session_state.gemini_client = initialize_dependencies()
         
-    # Ensure a current chat is always active
+    # FIX: Only create a new chat if one hasn't been set, AND the new chat flag is false 
+    # (The flag prevents accidental new chat creation during sidebar loads)
     if st.session_state.current_chat_id is None:
-        create_new_chat()
+        create_new_chat(save_current=False)
+    
+    # Reset the flag after the check
+    st.session_state.new_chat_triggered = False
 
     # Sidebar
     with st.sidebar:
@@ -554,16 +557,19 @@ def main_ui():
         
         # New Chat button with RAG Data clearing
         if st.button("🔄 Start New Chat & Clear RAG Data", use_container_width=True):
-            clear_chroma_data() # Clear all documents
-            st.session_state.chat_history = {} # Clear chat history
-            st.session_state.messages = [] # Clear current messages
-            st.session_state.current_chat_id = None # Force creation of new chat ID
-            st.experimental_rerun() # Rerun to force clean state
+            clear_chroma_data() 
+            st.session_state.chat_history = {} 
+            st.session_state.messages = [] 
+            st.session_state.current_chat_id = None 
+            st.session_state.new_chat_triggered = True
+            # FIX: Use st.rerun() instead of st.experimental_rerun()
+            st.rerun() 
 
         # New Chat button (keeps RAG data)
         if st.button("➕ Start New Chat (Keep Documents)", use_container_width=True):
-            create_new_chat()
-            st.experimental_rerun()
+            create_new_chat(save_current=True) # Ensure current chat is saved
+            # FIX: Use st.rerun() instead of st.experimental_rerun()
+            st.rerun()
             
         st.subheader("Chat History")
         
@@ -575,21 +581,25 @@ def main_ui():
                 reverse=True
             )
             
-            # Display only the last 10 chats to keep the sidebar clean
-            for chat_id in sorted_chat_ids[:10]:
+            # FIX: Loop through history and handle the chat loading action
+            for chat_id in sorted_chat_ids:
                 chat_data = st.session_state.chat_history[chat_id]
                 chat_title = chat_data.get('title', "Untitled Chat")
+                # FIX: Format date once to prevent loop repetition
                 date_str = chat_data['date'].strftime("%b %d, %I:%M %p")
                 
                 is_current = chat_id == st.session_state.current_chat_id
                 
                 with st.container(border=not is_current):
                     # Use a unique key for the button to prevent Streamlit key errors
+                    # The `on_click` callback is cleaner for history loading
+                    
                     if st.button(f"**{chat_title}**", key=f"btn_{chat_id}", use_container_width=True):
+                        # Action to load a previous chat
                         st.session_state.current_chat_id = chat_id
                         st.session_state.messages = chat_data['messages'] # Restore messages
-                        st.session_state.cag_cache = {} # Clear CAG cache on history load
-                        st.experimental_rerun()
+                        st.session_state.cag_cache = {} # Clear cache for new context
+                        st.rerun() # Rerun to display the restored chat messages
                     st.caption(date_str)
 
     # Main content area
