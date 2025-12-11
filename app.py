@@ -27,6 +27,17 @@ except ImportError:
 # =====================================================================
 import asyncio
 import edge_tts
+import nest_asyncio # <-- CRITICAL FIX for TTS in Streamlit
+
+# =====================================================================
+# FIX 2: ASYNCIO PATCH (for Streamlit compatibility)
+# Apply the nest_asyncio patch immediately to allow nested asyncio.run calls
+# =====================================================================
+try:
+    nest_asyncio.apply()
+except Exception:
+    # Ignore if already applied or if environment doesn't support it (unlikely)
+    pass 
 
 # --- Core RAG Imports ---
 import chromadb
@@ -43,7 +54,7 @@ from langsmith import traceable, tracing_context
 
 # --- Constants and Configuration ---
 COLLECTION_NAME = "rag_documents"
-EMBEDDING_MODEL = "all-MiniLM-L6-v2" # Using a fast, high-quality embedding model
+EMBEDDING_MODEL = "all-MiniLM-L6-v2" 
 
 # *** CRITICAL FIX: Read API Key from Streamlit Secrets ***
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY")
@@ -162,10 +173,8 @@ def call_gemini_api(prompt, max_retries=3):
 def clear_chroma_data():
     """Clears all data from the ChromaDB collection."""
     try:
-        # Check if collection exists before attempting to delete/create
         if COLLECTION_NAME in [col.name for col in st.session_state.db_client.list_collections()]:
             st.session_state.db_client.delete_collection(name=COLLECTION_NAME)
-        # Always create a new collection for the new chat
         st.session_state.db_client.get_or_create_collection(name=COLLECTION_NAME)
         st.toast("Knowledge base cleared!", icon="🗑️")
     except Exception as e:
@@ -337,6 +346,7 @@ def handle_user_input():
         try:
             with st.spinner("Generating speech..."):
                 selected_language_code = LANGUAGE_DICT[st.session_state.selected_language]
+                # THIS IS WHERE nest_asyncio MAKES asyncio.run WORK
                 audio_bytes = asyncio.run(generate_tts(st.session_state.tts_to_play, selected_language_code))
                 st.audio(audio_bytes, format='audio/mp3', start_time=0)
             del st.session_state['tts_to_play']
@@ -362,6 +372,7 @@ def handle_user_input():
                     try:
                         # Auto-play TTS immediately after generation if Voice mode is on
                         with st.spinner("Generating voice response..."):
+                            # THIS IS WHERE nest_asyncio MAKES asyncio.run WORK
                             audio_bytes = asyncio.run(generate_tts(response, selected_language_code))
                             st.audio(audio_bytes, format='audio/mp3', start_time=0)
                     except Exception as e:
@@ -393,7 +404,6 @@ def main_ui():
         new_chat_id = str(uuid.uuid4())
         
         # Check if we are coming from a 'New Chat' click where state might be partially reset
-        # If the key exists, reuse the messages list, otherwise create a new one.
         if new_chat_id not in st.session_state.chat_history:
              st.session_state.messages = []
         
@@ -440,15 +450,9 @@ def main_ui():
 
         # --- BUG FIX: New Chat Button ---
         if st.button("New Chat", use_container_width=True):
-            # 1. Clear the RAG knowledge base for the new chat
             clear_chroma_data() 
-            
-            # 2. Reset the current chat session state variables
             st.session_state.messages = []
             st.session_state.current_chat_id = None
-            
-            # 3. Streamlit will rerun naturally due to state change,
-            # which will trigger the 'Handle New Chat / Initialization' block above.
             st.toast("Starting a new chat session!", icon="✨")
 
         st.subheader("Chat History")
@@ -472,7 +476,6 @@ def main_ui():
                 if st.button(f"{chat_title}", key=f"btn_{chat_id}", use_container_width=True):
                     st.session_state.current_chat_id = chat_id
                     st.session_state.messages = st.session_state.chat_history[chat_id]['messages']
-                    # Using st.experimental_rerun() here is fine as we are changing the current_chat_id
                     st.experimental_rerun()
                 st.markdown(f"<small>{date_str}</small></div>", unsafe_allow_html=True)
 
@@ -495,12 +498,9 @@ def main_ui():
                     for uploaded_file in uploaded_files:
                         file_ext = uploaded_file.name.split('.')[-1].lower()
                         file_contents = None
-                        
-                        # Use .seek(0) to ensure the file is read from the beginning
                         uploaded_file.seek(0) 
 
                         try:
-                            # Use helper functions that handle the uploaded file object
                             if file_ext == "txt":
                                 file_contents = uploaded_file.getvalue().decode("utf-8")
                             elif file_ext == "pdf":
@@ -515,8 +515,8 @@ def main_ui():
                                 st.warning(f"Skipping unsupported file type: {uploaded_file.name}")
                                 continue
                             
-                            if file_contents and file_contents.strip(): # Check for non-empty content
-                                documents = split_documents(file_contents) # Uses overlapping chunking
+                            if file_contents and file_contents.strip():
+                                documents = split_documents(file_contents) 
                                 process_and_store_documents(documents)
                                 total_chunks += len(documents)
                             else:
@@ -545,11 +545,8 @@ def main_ui():
                             response.raise_for_status()
                             file_contents = response.text
                             
-                            # For URLs, we use requests.text, then process.
                             if file_ext == "csv":
-                                # Convert string content to file-like object for re-use of extractor functions
                                 file_obj = io.StringIO(file_contents)
-                                # Pandas read_csv needs the file object or path
                                 file_contents = pd.read_csv(file_obj).to_markdown(index=False)
                             elif file_ext == "html":
                                 soup = BeautifulSoup(file_contents, 'lxml')
@@ -573,11 +570,11 @@ def main_ui():
     handle_user_input()
 
 if __name__ == "__main__":
-    # Ensure asyncio is available for Edge-TTS on Windows
+    # Ensure asyncio is available for Edge-TTS on Windows (still needed for some environments)
     if sys.platform == "win32" and sys.version_info >= (3, 8):
         try:
             asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
         except AttributeError:
-            pass # Ignore if policy is not available
+            pass 
         
     main_ui()
