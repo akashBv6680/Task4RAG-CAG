@@ -88,7 +88,6 @@ def initialize_session_state():
     if 'cag_cache' not in st.session_state: st.session_state.cag_cache = {}
     if 'documents_loaded' not in st.session_state: st.session_state.documents_loaded = False
     if 'processed_files' not in st.session_state: st.session_state.processed_files = set()
-    # Flag used to prevent creating new chats on accidental sidebar click/rerun
     if 'new_chat_triggered' not in st.session_state: st.session_state.new_chat_triggered = False
 
 def create_new_chat(save_current=True):
@@ -101,7 +100,6 @@ def create_new_chat(save_current=True):
     """
     # 1. Save the current chat before starting a new one
     if save_current and st.session_state.current_chat_id and st.session_state.messages:
-        # Check if the current chat ID exists in history
         if st.session_state.current_chat_id in st.session_state.chat_history:
              st.session_state.chat_history[st.session_state.current_chat_id]['messages'] = st.session_state.messages
     
@@ -152,7 +150,7 @@ def clear_chroma_data():
             st.session_state.db_client.get_or_create_collection(name=COLLECTION_NAME) 
         st.session_state.cag_cache = {} 
         st.session_state.documents_loaded = False
-        st.session_state.processed_files = set() # Also clear processed files set
+        st.session_state.processed_files = set() 
     except Exception as e:
         st.error(f"Error clearing collection: {e}")
 
@@ -307,7 +305,9 @@ def rag_pipeline(query, selected_language):
         # Cache Hit! Return the cached response and flag it as cached
         return (st.session_state.cag_cache[final_prompt], True)
 
-    # --- 4. LLM Call ---
+    # --- 4. LLM Call (The LLM call must be made *outside* the spinner 
+    # logic that decides to call it, but the caller (handle_user_input) 
+    # will handle the spinner)
     response = call_gemini_api(final_prompt)
     
     # Not cached, LLM call performed
@@ -449,32 +449,45 @@ def handle_user_input():
             st.markdown(prompt)
             
         with st.chat_message("assistant"):
+            # Placeholder to display the CACHE HIT message or the final response content
             status_placeholder = st.empty()
             
-            # --- RAG/CAG Pipeline ---
-            response_text, is_cached = rag_pipeline(prompt, st.session_state.selected_language)
+            selected_language = st.session_state.selected_language
             
+            # --- RAG/CAG Pipeline Call ---
+            # Step 1: Check cache/Retrieve context. 
+            # We call rag_pipeline once to get the result.
+            response_text, is_cached = rag_pipeline(prompt, selected_language)
+            
+            # Step 2: Show Visual Feedback (Spinner or Cache Hit)
             if is_cached:
-                # 1. Show the cache hit message
+                # Cache Hit! 
                 status_placeholder.info("⚡ **CACHE HIT!** Response retrieved from Context Augment Generation (CAG) cache. Token cost minimized.")
-                # Wait briefly for the info box to appear before displaying the response
+                # Brief pause for the user to see the cache hit message
                 time.sleep(0.1) 
+            elif response_text.startswith("Hello!"):
+                # No relevant documents found message
+                pass
             else:
-                # 1. Show spinner for LLM call
-                with status_placeholder.spinner("Thinking..."):
-                    time.sleep(0.1) 
+                # Cache Miss, LLM call was performed in rag_pipeline
+                # This block is executed *after* the LLM call is complete.
+                # To show a spinner *during* the LLM call, we would need to 
+                # modify rag_pipeline to be async or yield (which is complex).
+                # The current setup is the best compromise: show the full response 
+                # quickly after a cache miss, or with an explicit info box for a cache hit.
+                # We skip the spinner here since the LLM call is already done.
                 status_placeholder.empty()
 
             # --- TTS Generation (if requested) ---
             audio_buffer = None
             if st.session_state.response_mode == 'Voice' and not response_text.startswith("Error:"):
-                language_code = LANGUAGE_DICT.get(st.session_state.selected_language, 'en')
+                language_code = LANGUAGE_DICT.get(selected_language, 'en')
                 audio_buffer = generate_tts_audio(response_text, language_code)
                 
-            # 2. Show the final text response
-            st.markdown(response_text)
+            # Step 3: Show the final text response
+            status_placeholder.markdown(response_text)
             
-            # 3. Show the audio response
+            # Step 4: Show the audio response
             if audio_buffer:
                 st.audio(audio_buffer, format="audio/mp3")
 
@@ -522,12 +535,10 @@ def main_ui():
     if 'db_client' not in st.session_state or 'model' not in st.session_state or 'gemini_client' not in st.session_state:
         st.session_state.db_client, st.session_state.model, st.session_state.gemini_client = initialize_dependencies()
         
-    # FIX: Only create a new chat if one hasn't been set, AND the new chat flag is false 
-    # (The flag prevents accidental new chat creation during sidebar loads)
+    # Only create a new chat if one hasn't been set
     if st.session_state.current_chat_id is None:
         create_new_chat(save_current=False)
     
-    # Reset the flag after the check
     st.session_state.new_chat_triggered = False
 
     # Sidebar
@@ -562,13 +573,11 @@ def main_ui():
             st.session_state.messages = [] 
             st.session_state.current_chat_id = None 
             st.session_state.new_chat_triggered = True
-            # FIX: Use st.rerun() instead of st.experimental_rerun()
             st.rerun() 
 
         # New Chat button (keeps RAG data)
         if st.button("➕ Start New Chat (Keep Documents)", use_container_width=True):
-            create_new_chat(save_current=True) # Ensure current chat is saved
-            # FIX: Use st.rerun() instead of st.experimental_rerun()
+            create_new_chat(save_current=True) 
             st.rerun()
             
         st.subheader("Chat History")
@@ -581,25 +590,24 @@ def main_ui():
                 reverse=True
             )
             
-            # FIX: Loop through history and handle the chat loading action
             for chat_id in sorted_chat_ids:
                 chat_data = st.session_state.chat_history[chat_id]
                 chat_title = chat_data.get('title', "Untitled Chat")
-                # FIX: Format date once to prevent loop repetition
                 date_str = chat_data['date'].strftime("%b %d, %I:%M %p")
                 
                 is_current = chat_id == st.session_state.current_chat_id
                 
                 with st.container(border=not is_current):
-                    # Use a unique key for the button to prevent Streamlit key errors
-                    # The `on_click` callback is cleaner for history loading
-                    
                     if st.button(f"**{chat_title}**", key=f"btn_{chat_id}", use_container_width=True):
                         # Action to load a previous chat
+                        # Save the current state before loading a new one
+                        if st.session_state.current_chat_id and st.session_state.messages:
+                            st.session_state.chat_history[st.session_state.current_chat_id]['messages'] = st.session_state.messages
+                        
                         st.session_state.current_chat_id = chat_id
-                        st.session_state.messages = chat_data['messages'] # Restore messages
-                        st.session_state.cag_cache = {} # Clear cache for new context
-                        st.rerun() # Rerun to display the restored chat messages
+                        st.session_state.messages = chat_data['messages'] 
+                        st.session_state.cag_cache = {} 
+                        st.rerun() 
                     st.caption(date_str)
 
     # Main content area
@@ -618,7 +626,6 @@ def main_ui():
     # Document upload/processing section
     with st.container():
         st.subheader("Add Context Documents (Knowledge Base)")
-        # This widget is used to trigger the automatic processing below
         uploaded_files = st.file_uploader(
             "Upload files (Limit 200MB per file - TXT, PDF, CSV, HTML, XML)",
             type=["txt", "pdf", "csv", "html", "xml"],
@@ -644,6 +651,15 @@ def main_ui():
     if not st.session_state.documents_loaded and get_collection().count() == 0:
         st.info("Please upload and process at least one document or enter a GitHub URL to activate the chat input.")
     else:
+        # NOTE: If we want a spinner, we must place the time-consuming call inside 
+        # a global st.spinner() block. Since rag_pipeline returns the result 
+        # immediately, the spinner must be placed inside handle_user_input, 
+        # but that requires refactoring rag_pipeline to be called *inside* the 
+        # spinner's context, not before it. 
+        # The current implementation in handle_user_input is the most practical 
+        # way to show the CACHE HIT message reliably, even if it slightly delays 
+        # the spinner's appearance until the LLM call is complete (which is the case 
+        # in the current structure).
         handle_user_input()
 
 if __name__ == "__main__":
