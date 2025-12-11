@@ -89,7 +89,7 @@ def initialize_session_state():
     if 'documents_loaded' not in st.session_state: st.session_state.documents_loaded = False
     if 'processed_files' not in st.session_state: st.session_state.processed_files = set()
     if 'new_chat_triggered' not in st.session_state: st.session_state.new_chat_triggered = False
-    # New state to track processed URLs
+    # State to track processed URLs
     if 'processed_urls' not in st.session_state: st.session_state.processed_urls = set()
 
 def create_new_chat(save_current=True):
@@ -153,7 +153,7 @@ def clear_chroma_data():
         st.session_state.cag_cache = {} 
         st.session_state.documents_loaded = False
         st.session_state.processed_files = set() 
-        st.session_state.processed_urls = set() # Clear processed URLs
+        st.session_state.processed_urls = set()
     except Exception as e:
         st.error(f"Error clearing collection: {e}")
 
@@ -230,7 +230,9 @@ def process_and_store_documents(documents):
 # =====================================================================
 
 @traceable(run_type="llm")
-def call_gemini_api(prompt, max_retries=3):
+# FIX: Increased max_retries to 6 to reduce the chance of timeout errors 
+# during complex RAG or multilingual generation.
+def call_gemini_api(prompt, max_retries=6): 
     """Calls the Google Gemini API for text generation."""
     gemini_client = st.session_state.gemini_client
     
@@ -564,6 +566,7 @@ def main_ui():
         st.markdown("---")
         
         # New Chat button with RAG Data clearing
+        # FIX: Ensure st.rerun() is used
         if st.button("🔄 Start New Chat & Clear RAG Data", use_container_width=True):
             clear_chroma_data() 
             st.session_state.chat_history = {} 
@@ -573,6 +576,7 @@ def main_ui():
             st.rerun() 
 
         # New Chat button (keeps RAG data)
+        # FIX: Ensure st.rerun() is used
         if st.button("➕ Start New Chat (Keep Documents)", use_container_width=True):
             create_new_chat(save_current=True) 
             st.rerun()
@@ -604,6 +608,7 @@ def main_ui():
                         st.session_state.current_chat_id = chat_id
                         st.session_state.messages = chat_data['messages'] 
                         st.session_state.cag_cache = {} 
+                        # FIX: Ensure st.rerun() is used
                         st.rerun() 
                     st.caption(date_str)
 
@@ -636,10 +641,8 @@ def main_ui():
         # --- GitHub URL Input ---
         github_url = st.text_input("Enter a GitHub raw URL (.txt, .md, .csv, .html, .xml):", key='github_url_input')
         
-        # --- Automatic URL Processing Logic (Replaces the button) ---
+        # --- Automatic URL Processing Logic ---
         if github_url and github_url not in st.session_state.processed_urls:
-             # This automatically processes the file when the user finishes typing/pasting
-             # and the script reruns, as long as it hasn't been processed yet.
              handle_url_upload(github_url)
              
     st.markdown("---")
