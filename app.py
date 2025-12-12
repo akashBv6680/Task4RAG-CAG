@@ -407,9 +407,9 @@ elif menu == "RAG Chatbot":
         
     for msg in st.session_state.messages_rag:
         st.chat_message(msg["role"]).write(msg["content"])
-         # Display audio if it exists for this message
- if "audio" in msg and msg["audio"]:
-  st.audio(io.BytesIO(base64.b64decode(msg["audio"])), format="audio/mp3")
+          # Display audio if it exists for this message
+  if "audio" in msg and msg["audio"]:
+    st.audio(io.BytesIO(base64.b64decode(msg["audio"])), format="audio/mp3")
         
     if prompt := st.chat_input("Ask a question about your documents..."):
         st.session_state.messages_rag.append({"role": "user", "content": prompt})
