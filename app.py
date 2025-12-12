@@ -272,9 +272,7 @@ def synthesize(text: str, engine: str, lang_code="en"):
         "ko": "ko-KR-SunHiNeural", "pt": "pt-PT-FernandaNeural", "it": "it-IT-ElsaNeural", "nl": "nl-NL-ColetteNeural",
         "tr": "tr-TR-AhmetNeural", "ru": "ru-RU-DariyaNeural"
     }
-    if engine == "Gemini TTS":
-        audio, err = tts_gemini(text, voice_name="Kore")
-        return (audio, "audio/mp3", err)
+    
     if engine == "Edge-TTS":
         voice = edge_voice_map.get(lang_code, "en-US-AriaNeural")
         audio, err = tts_edge(text, voice=voice, rate="+0%")
