@@ -3,7 +3,7 @@
 # Status: RAG System with file support (PDF, TXT, CSV, HTML, XML, GitHub raw).
 # Features: Conversation Augmented Generation (CAG) for cost-saving, Voice Response Mode, Multilingual.
 import streamlit as st
-import os, sys, tempfile, uuid, time, io, asyncio, datetime, re
+import os, sys, tempfile, uuid, time, io, asyncio, datetime, re, base64
 import numpy as np
 import pandas as pd
 from typing import Dict, Any, List
@@ -407,6 +407,9 @@ elif menu == "RAG Chatbot":
         
     for msg in st.session_state.messages_rag:
         st.chat_message(msg["role"]).write(msg["content"])
+         # Display audio if it exists for this message
+ if "audio" in msg and msg["audio"]:
+  st.audio(io.BytesIO(base64.b64decode(msg["audio"])), format="audio/mp3")
         
     if prompt := st.chat_input("Ask a question about your documents..."):
         st.session_state.messages_rag.append({"role": "user", "content": prompt})
@@ -431,7 +434,7 @@ elif menu == "RAG Chatbot":
                         else:
                             st.warning(f"TTS failed: {err}")
                             
-                st.session_state.messages_rag.append({"role": "assistant", "content": answer})
+                st.session_state.messages_rag.append({"role": "assistant", "content": answer}, "audio": base64.b64encode(audio).decode('utf-8') if audio else None)
                 
 elif menu == "TTS Demo (Standalone)":
     st.title("Text-to-Speech Demo 🔊")
