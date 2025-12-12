@@ -407,9 +407,9 @@ elif menu == "RAG Chatbot":
         
     for msg in st.session_state.messages_rag:
         st.chat_message(msg["role"]).write(msg["content"])
-          # Display audio if it exists for this message
-  if "audio" in msg and msg["audio"]:
-    st.audio(io.BytesIO(base64.b64decode(msg["audio"])), format="audio/mp3")
+        # Display audio if it exists for this message
+        if "audio" in msg and msg["audio"]:
+            st.audio(io.BytesIO(base64.b64decode(msg["audio"])), format="audio/mp3")
         
     if prompt := st.chat_input("Ask a question about your documents..."):
         st.session_state.messages_rag.append({"role": "user", "content": prompt})
@@ -417,6 +417,7 @@ elif menu == "RAG Chatbot":
         
         with st.chat_message("assistant"):
             # Ensure the response is quick as requested (within a minute is default for most models)
+            audio = None
             with st.spinner("Retrieving context and generating..."):
                 start_time = time.time()
                 
@@ -434,8 +435,13 @@ elif menu == "RAG Chatbot":
                         else:
                             st.warning(f"TTS failed: {err}")
                             
-                st.session_state.messages_rag.append({"role": "assistant", "content": answer}, "audio": base64.b64encode(audio).decode('utf-8') if audio else None)
+            # **Corrected Indentation and Dict Update**
+            new_assistant_msg = {"role": "assistant", "content": answer}
+            if audio:
+                new_assistant_msg["audio"] = base64.b64encode(audio).decode('utf-8')
                 
+            st.session_state.messages_rag.append(new_assistant_msg)
+            
 elif menu == "TTS Demo (Standalone)":
     st.title("Text-to-Speech Demo 🔊")
     st.info("Uses the selected TTS engine and language from the sidebar.")
