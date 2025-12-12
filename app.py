@@ -214,27 +214,6 @@ def call_gemini_api(prompt, model_name="gemini-2.5-flash", system_instruction="Y
 # -------------------------
 # TTS utilities (retained)
 # -------------------------
-def tts_gemini(text: str, voice_name="Kore"):
-    """SDK-compatible Gemini TTS call. Returns (bytes, error)"""
-    if not (genai and GEMINI_API_KEY): return None, "Gemini TTS not available."
-    try:
-        client = initialize_gemini_client()
-        cfg = types.GenerateContentConfig(
-            response_modalities=["AUDIO"],
-            speech_config=types.SpeechConfig(
-                voice_config=types.VoiceConfig(
-                    prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=voice_name)
-                )
-            )
-        )
-        resp = client.models.generate_content(
-            model="gemini-2.5-flash-preview-tts",
-            contents=text,
-            config=cfg,
-        )
-        return resp.binary, None
-    except Exception as e:
-        return None, str(e)
 
 async def _edge_async(text: str, voice="en-US-AriaNeural", rate=None):
     if not edge_tts: return None
@@ -355,7 +334,7 @@ if st.sidebar.button("Clear RAG Storage & Cache"):
 st.sidebar.markdown("---")
 st.sidebar.subheader("Response Options")
 resp_mode = st.sidebar.selectbox("Response mode", ["Text", "Voice"])
-tts_engine = st.sidebar.selectbox("TTS engine", ["Gemini TTS", "Edge-TTS", "gTTS"])
+tts_engine = st.sidebar.selectbox("TTS engine", ["Edge-TTS", "gTTS"])
 
 if 'selected_language' not in st.session_state:
     st.session_state.selected_language = "English"
