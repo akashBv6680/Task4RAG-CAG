@@ -9,6 +9,9 @@ import pandas as pd
 from typing import Dict, Any, List
 import torch
 # RAG dependencies
+from agentops_config import tracker
+import time
+
 import chromadb
 # Note: Ensure sentence-transformers is installed for this to work
 try:
@@ -34,6 +37,10 @@ except ImportError:
     genai = None
     APIError = None
     types = None
+# Initialize AgentOps at app startup
+if "agentops_initialized" not in st.session_state:
+    tracker.initialize()
+    st.session_state.agentops_initialized = True
 
 # Optional TTS engines
 try:
@@ -311,7 +318,7 @@ def rag_pipeline(query, selected_language):
 # -------------------------
 st.sidebar.title("RAG Settings ⚙️")
 menu = st.sidebar.radio("Select Module", ["Document Loader", "RAG Chatbot", "TTS Demo (Standalone)"])
-
+st.divider()
 st.sidebar.markdown("---")
 st.sidebar.subheader("🤖 AgentOps Monitoring")
 if tracker.is_initialized:
