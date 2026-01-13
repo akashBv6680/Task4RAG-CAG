@@ -8,6 +8,8 @@ import numpy as np
 import pandas as pd
 from typing import Dict, Any, List
 import torch
+# AgentOps Integration
+from agentops_config import tracker
 # RAG dependencies
 import chromadb
 # Note: Ensure sentence-transformers is installed for this to work
@@ -49,6 +51,11 @@ except Exception:
 # App config
 # -------------------------
 st.set_page_config(page_title="RAG AI Agent 📚", page_icon="🤖", layout="wide")
+
+# Initialize AgentOps at app startup
+if "agentops_initialized" not in st.session_state:
+    tracker.initialize()
+    st.session_state.agentops_initialized = True
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY")
 
 LANGUAGE_DICT = {
@@ -331,7 +338,8 @@ if st.sidebar.button("Clear RAG Storage & Cache"):
     clear_rag_storage()
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("Response Options")
+st.sidebar.subheader("150
+")
 resp_mode = st.sidebar.selectbox("Response mode", ["Text", "Voice"])
 tts_engine = st.sidebar.selectbox("TTS engine", ["Edge-TTS", "gTTS"])
 
@@ -340,6 +348,16 @@ if 'selected_language' not in st.session_state:
 lang_display = st.sidebar.selectbox("Answer Language", list(LANGUAGE_DICT.keys()), index=0)
 st.session_state.selected_language = lang_display
 lang_code = LANGUAGE_DICT.get(lang_display, "en")
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("🤖 AgentOps Monitoring")
+if tracker.is_initialized:
+    st.sidebar.success(f"✅ Session: {tracker.session_id[:8]}...")
+    dashboard_url = tracker.get_session_dashboard_url()
+    if dashboard_url:
+        st.sidebar.markdown(f"[📊 View Dashboard]({dashboard_url})")
+else:
+    st.sidebar.warning("⚠️ AgentOps: Check API key in secrets")
 
 # -------------------------
 # Modules
@@ -379,6 +397,11 @@ if menu == "Document Loader":
                             st.warning(f"No content found in '{uploaded_file.name}'.")
                     else:
                         st.error(f"Failed to process '{uploaded_file.name}': {raw_text}")
+                                    tracker.track_document_upload(
+                filename=uploaded_file.name,
+                file_size=len(uploaded_file.getvalue()),
+                chunk_count=len(docs)
+            )
             
             st.success(f"Total new chunks added: {newly_ingested}")
             st.rerun() # Refresh status
@@ -420,7 +443,18 @@ elif menu == "RAG Chatbot":
             with st.spinner("Retrieving context and generating..."):
                 start_time = time.time()
                 
-                answer = rag_pipeline(prompt, st.session_state.selected_language)
+                480
+445
+answer = rag_pipeline(prompt, st.session_state.selected_language)    start_time = time.time()
+            answer = rag_pipeline(prompt, st.session_state.selected_language)
+            response_time = time.time() - start_time
+            
+            tracker.track_rag_query(
+                query=prompt,
+                retrieved_chunks=len(retrieve_documents(prompt)),
+                answer=answer,
+                response_time=response_time
+            )(prompt, st.session_state.selected_language)
                 
                 duration = time.time() - start_time
                 st.write(answer)
@@ -430,7 +464,8 @@ elif menu == "RAG Chatbot":
                     with st.spinner("Synthesizing speech..."):
                         audio, mime, err = synthesize(answer, tts_engine, lang_code)
                         if audio:
-                            st.audio(io.BytesIO(audio), format=mime)
+                            467
+                            
                         else:
                             st.warning(f"TTS failed: {err}")
                             
@@ -455,4 +490,10 @@ elif menu == "TTS Demo (Standalone)":
                 else:
                     st.error(f"TTS Generation Failed: {err}")
         else:
+                    tracker.track_tts_generation(
+                text=answer,
+                language=st.session_state.selected_language,
+                engine=tts_engine,
+                audio_duration=5.0
+            )
             st.warning("Please enter some text for TTS.")
