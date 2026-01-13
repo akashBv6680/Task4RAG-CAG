@@ -8,7 +8,6 @@ import numpy as np
 import pandas as pd
 from typing import Dict, Any, List
 import torch
-
 # RAG dependencies
 import chromadb
 # Note: Ensure sentence-transformers is installed for this to work
