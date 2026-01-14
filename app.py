@@ -322,7 +322,7 @@ st.divider()
 st.sidebar.markdown("---")
 st.sidebar.subheader("🤖 AgentOps Monitoring")
 if tracker.is_initialized:
-    st.sidebar.success(f"✅ Session: {tracker.get_session_id()[:8]}...")
+    st.sidebar.success(f"✅ Session: {tracker.session_id[:8]}...")
     dashboard_url = tracker.get_session_dashboard_url()
     if dashboard_url:
         st.sidebar.markdown(f"[📊 View Dashboard]({dashboard_url})")
