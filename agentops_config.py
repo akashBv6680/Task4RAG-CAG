@@ -11,21 +11,24 @@ class RAGAgentOpsTracker:
         self.session_id = None
         self.is_initialized = False
         self.operations = []
-        
     def initialize(self):
-        """Initialize AgentOps client"""
-        try:
-            api_key = st.secrets.get("AGENTOPS_API_KEY")
-            if not api_key:
-                st.warning("\u26a0\ufe0f AgentOps API key not found in secrets. Set it in Streamlit Cloud.")
-                return False
-                
-            # Initialize AgentOps
-            agentops.init(api_key=api_key)
-            self.is_initialized = True
-            self.session_id = agentops.get_session_id()
-            st.success(f"\u2705 AgentOps initialized with session: {self.session_id}")
-            return True
+    """Initialize AgentOps client"""
+    try:
+        api_key = st.secrets.get("AGENTOPS_API_KEY")
+        if not api_key:
+            st.warning("⚠️ AgentOps API key not found in secrets. Set it in Streamlit Cloud.")
+            return False
+        
+        # Initialize AgentOps and capture the session object
+        session = agentops.init(api_key=api_key)
+        self.is_initialized = True
+        self.session_id = session.session_id
+        st.success(f"✅ AgentOps initialized with session: {self.session_id}")
+        return True
+    except Exception as e:
+        st.error(f"❌ Failed to initialize AgentOps: {str(e)}")
+        return False
+    
         except Exception as e:
             st.error(f"\u274c Failed to initialize AgentOps: {str(e)}")
             return False
