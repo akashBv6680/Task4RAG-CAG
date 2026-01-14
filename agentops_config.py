@@ -23,7 +23,7 @@ class RAGAgentOpsTracker:
             # Initialize AgentOps and capture the session object
             session = agentops.init(api_key=api_key)
             self.is_initialized = True
-            self.session_id = session.session_id
+            self.session_id = session.id
             st.success(f"✅ AgentOps initialized with session: {self.session_id}")
             return True
         except Exception as e:
