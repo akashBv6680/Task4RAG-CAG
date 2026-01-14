@@ -11,26 +11,23 @@ class RAGAgentOpsTracker:
         self.session_id = None
         self.is_initialized = False
         self.operations = []
-    def initialize(self):
-    """Initialize AgentOps client"""
-    try:
-        api_key = st.secrets.get("AGENTOPS_API_KEY")
-        if not api_key:
-            st.warning("⚠️ AgentOps API key not found in secrets. Set it in Streamlit Cloud.")
-            return False
-        
-        # Initialize AgentOps and capture the session object
-        session = agentops.init(api_key=api_key)
-        self.is_initialized = True
-        self.session_id = session.session_id
-        st.success(f"✅ AgentOps initialized with session: {self.session_id}")
-        return True
-    except Exception as e:
-        st.error(f"❌ Failed to initialize AgentOps: {str(e)}")
-        return False
     
+    def initialize(self):
+        """Initialize AgentOps client"""
+        try:
+            api_key = st.secrets.get("AGENTOPS_API_KEY")
+            if not api_key:
+                st.warning("⚠️ AgentOps API key not found in secrets. Set it in Streamlit Cloud.")
+                return False
+            
+            # Initialize AgentOps and capture the session object
+            session = agentops.init(api_key=api_key)
+            self.is_initialized = True
+            self.session_id = session.session_id
+            st.success(f"✅ AgentOps initialized with session: {self.session_id}")
+            return True
         except Exception as e:
-            st.error(f"\u274c Failed to initialize AgentOps: {str(e)}")
+            st.error(f"❌ Failed to initialize AgentOps: {str(e)}")
             return False
     
     def track_document_upload(self, filename: str, file_size: int, chunk_count: int):
@@ -144,7 +141,7 @@ class RAGAgentOpsTracker:
         try:
             if self.is_initialized:
                 agentops.end_session()
-                st.info("\u2705 AgentOps session ended")
+                st.info("✅ AgentOps session ended")
         except Exception as e:
             print(f"Error ending AgentOps session: {str(e)}")
 
