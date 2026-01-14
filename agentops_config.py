@@ -3,7 +3,6 @@ import os
 import streamlit as st
 from datetime import datetime
 import json
-
 class RAGAgentOpsTracker:
     """Tracks RAG operations with AgentOps"""
     
