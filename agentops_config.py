@@ -3,6 +3,7 @@ import os
 import streamlit as st
 from datetime import datetime
 import json
+
 class RAGAgentOpsTracker:
     """Tracks RAG operations with AgentOps"""
     
@@ -19,12 +20,16 @@ class RAGAgentOpsTracker:
                 st.warning("⚠️ AgentOps API key not found in secrets. Set it in Streamlit Cloud.")
                 return False
             
-            # Initialize AgentOps and capture the session object
+            # Initialize AgentOps - use the correct session ID access
             session = agentops.init(api_key=api_key)
             self.is_initialized = True
-            self.session_id = session.id
+            # Use session_id property instead of .id attribute
+            self.session_id = session.session_id if hasattr(session, 'session_id') else str(session)
             st.success(f"✅ AgentOps initialized with session: {self.session_id}")
             return True
+        except AttributeError as e:
+            st.error(f"❌ Failed to initialize AgentOps: Session object structure mismatch - {str(e)}")
+            return False
         except Exception as e:
             st.error(f"❌ Failed to initialize AgentOps: {str(e)}")
             return False
