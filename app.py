@@ -12,6 +12,17 @@ import torch
 from agentops_config import tracker
 import time
 
+import requests  # at top with other imports
+
+def load_text_from_url(url: str) -> str:
+    try:
+        resp = requests.get(url, timeout=15)
+        resp.raise_for_status()
+        # Basic HTML stripping: keep it simple or plug in BeautifulSoup if needed
+        return resp.text
+    except Exception as e:
+        return f"Error fetching URL {url}: {e}"
+
 import chromadb
 # Note: Ensure sentence-transformers is installed for this to work
 try:
@@ -364,50 +375,93 @@ lang_code = LANGUAGE_DICT.get(lang_display, "en")
 
 if menu == "Document Loader":
     st.title("Document Loader 📄➡️🧠")
-    st.markdown("## RAG System Status: Files Ingestion and Chunking")
-    st.caption("Upload documents (PDF, TXT, CSV, HTML, XML, etc.) to build the RAG knowledge base. Files are processed using **overlapping chunking** for better context retrieval. **Note:** For PDF/CSV support, check `requirements.txt`.")
-    
-    uploaded_files = st.file_uploader(
-        "Upload Files (PDF, TXT, CSV, HTML, XML, JSON, etc.)",
-        type=["pdf", "txt", "csv", "html", "xml", "json"],
-        accept_multiple_files=True
+    st.markdown("## RAG System Status: Files & URLs Ingestion and Chunking")
+    st.caption(
+        "Upload documents (PDF, TXT, CSV, HTML, XML, JSON) or enter a URL to "
+        "build the RAG knowledge base. Files/URLs are processed using overlapping "
+        "chunking for better context retrieval. **Note:** For PDF/CSV support, check `requirements.txt`."
     )
-    
-    if uploaded_files:
-        if st.button(f"Process {len(uploaded_files)} File(s) and Ingest"):
-            newly_ingested = 0
-            ingested_names = set(st.session_state.ingested_files)
-            
-            with st.spinner("Processing and storing documents..."):
-                for uploaded_file in uploaded_files:
-                    if uploaded_file.name in ingested_names:
-                        st.warning(f"Skipped: '{uploaded_file.name}' already processed.")
-                        continue
-                        
-                    raw_text, success = extract_text_from_upload(uploaded_file)
-                    
-                    if success:
-                        docs = split_documents(raw_text)
-                        if docs:
-                            newly_ingested += process_and_store_documents(docs)
-                            st.session_state.ingested_files.append(uploaded_file.name)
-                            st.success(f"Successfully processed '{uploaded_file.name}' into {len(docs)} chunks.")
-                            tracker.track_document_upload(filename=uploaded_file.name,file_size=len(uploaded_file.getvalue()),chunk_count=len(docs))
 
+    col1, col2 = st.columns(2)
+
+    # -------- File uploader (existing behavior) --------
+    with col1:
+        uploaded_files = st.file_uploader(
+            "Upload Files (PDF, TXT, CSV, HTML, XML, JSON, etc.)",
+            type=["pdf", "txt", "csv", "html", "xml", "json"],
+            accept_multiple_files=True
+        )
+
+        if uploaded_files:
+            if st.button(f"Process {len(uploaded_files)} File(s) and Ingest"):
+                newly_ingested = 0
+                ingested_names = set(st.session_state.ingested_files)
+
+                with st.spinner("Processing and storing documents..."):
+                    for uploaded_file in uploaded_files:
+                        if uploaded_file.name in ingested_names:
+                            st.warning(f"Skipped: '{uploaded_file.name}' already processed.")
+                            continue
+
+                        raw_text, success = extract_text_from_upload(uploaded_file)
+
+                        if success:
+                            docs = split_documents(raw_text)
+                            if docs:
+                                newly_ingested += process_and_store_documents(docs)
+                                st.session_state.ingested_files.append(uploaded_file.name)
+                                st.success(
+                                    f"Successfully processed '{uploaded_file.name}' "
+                                    f"into {len(docs)} chunks."
+                                )
+                                tracker.track_document_upload(
+                                    filename=uploaded_file.name,
+                                    file_size=len(uploaded_file.getvalue()),
+                                    chunk_count=len(docs)
+                                )
+                            else:
+                                st.warning(f"No content found in '{uploaded_file.name}'.")
                         else:
-                            st.warning(f"No content found in '{uploaded_file.name}'.")
+                            st.error(f"Failed to process '{uploaded_file.name}': {raw_text}")
+
+                st.success(f"Total new chunks added: {newly_ingested}")
+                st.rerun()  # Refresh status
+
+    # -------- URL loader (new) --------
+    with col2:
+        st.subheader("Load from URL 🌐")
+        url_input = st.text_input("Enter a website URL (http/https)")
+
+        if st.button("Fetch URL and Ingest") and url_input.strip():
+            with st.spinner(f"Fetching and processing: {url_input}"):
+                page_text = load_text_from_url(url_input.strip())
+
+                # If error string is returned, treat as failure
+                if page_text.startswith("Error fetching URL"):
+                    st.error(page_text)
+                else:
+                    docs = split_documents(page_text)
+                    if docs:
+                        added = process_and_store_documents(docs)
+                        # Track URL as a pseudo-file name
+                        st.session_state.ingested_files.append(url_input.strip())
+                        st.success(
+                            f"Ingested {added} chunks from URL:\n{url_input.strip()}"
+                        )
+                        tracker.track_document_upload(
+                            filename=url_input.strip(),
+                            file_size=len(page_text.encode("utf-8")),
+                            chunk_count=len(docs)
+                        )
                     else:
-                        st.error(f"Failed to process '{uploaded_file.name}': {raw_text}")
-            
-            st.success(f"Total new chunks added: {newly_ingested}")
-            st.rerun() # Refresh status
+                        st.warning("No content extracted from the provided URL.")
 
     st.markdown("---")
-    st.subheader("Currently Ingested Files")
+    st.subheader("Currently Ingested Files / URLs")
     if st.session_state.ingested_files:
         st.json(st.session_state.ingested_files)
     else:
-        st.info("No files have been loaded into the RAG system.")
+        st.info("No files or URLs have been loaded into the RAG system.")
         
 elif menu == "RAG Chatbot":
     st.markdown("## RAG AI Agent 🧠 (Context-Aware Chat)")
